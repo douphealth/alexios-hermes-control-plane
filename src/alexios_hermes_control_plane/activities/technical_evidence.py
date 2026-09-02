@@ -34,7 +34,8 @@ async def _probe(client: httpx.AsyncClient, url: str) -> dict[str, Any]:
 async def collect_technical_evidence(sites: list[dict[str, str]]) -> dict[str, Any]:
     observed_at = datetime.now(UTC).isoformat()
     evidence: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=20.0, headers={"User-Agent": "AHCP-SEO-Audit/1.0"}) as client:
+    headers = {"User-Agent": "AHCP-SEO-Audit/1.0"}
+    async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
         for site in sites:
             site_id = str(site.get("site_id") or site.get("site") or "unknown")
             hostname = str(site.get("site") or "").strip().strip("/")
@@ -52,7 +53,8 @@ async def collect_technical_evidence(sites: list[dict[str, str]]) -> dict[str, A
             sitemap = probes[2]
             summary = (
                 f"Technical probe for {site_id}: homepage={homepage.get('status', 'ERR')}, "
-                f"robots={robots.get('status', 'ERR')}, sitemap_index={sitemap.get('status', 'ERR')}."
+                f"robots={robots.get('status', 'ERR')}, "
+                f"sitemap_index={sitemap.get('status', 'ERR')}."
             )
             digest_seed = repr(probes)
             record = Evidence(
