@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-SITES = [
+WORDPRESS_SITES = [
     ("gearuptofit", "https://gearuptofit.com"),
     ("affiliatemarketingforsuccess", "https://affiliatemarketingforsuccess.com"),
     ("plantastichaven", "https://plantastichaven.com"),
@@ -19,7 +19,10 @@ SITES = [
     ("frenchyfab", "https://frenchyfab.com"),
     ("micegoneguide", "https://micegoneguide.com"),
     ("efficientgptprompts", "https://efficientgptprompts.com"),
-    ("openclaw-skillshub", "https://openclaw-skillshub.com"),
+]
+
+NON_WORDPRESS_SITES = [
+    ("openclaw-skillshub", "https://openclaw-skillshub.com", "github-static"),
 ]
 
 
@@ -79,9 +82,18 @@ def main() -> int:
 
     print("Secure WordPress production commissioning")
     print("Credentials are entered locally and are never echoed.")
-    print("All 9 sites must pass REST authentication before production mode is enabled.\n")
+    print(
+        f"All {len(WORDPRESS_SITES)} WordPress sites must pass REST authentication "
+        "before production mode is enabled."
+    )
+    for site_id, base_url, adapter in NON_WORDPRESS_SITES:
+        print(
+            f"SKIP: {site_id} {base_url} is {adapter}; "
+            "it stays in portfolio intelligence but is not commissioned through WordPress REST."
+        )
+    print()
 
-    for site_id, base_url in SITES:
+    for site_id, base_url in WORDPRESS_SITES:
         print(f"[{site_id}] {base_url}")
         username = input("WordPress username: ").strip()
         password = getpass.getpass("Application Password: ").strip()
@@ -120,6 +132,10 @@ def main() -> int:
     print("ALL WORDPRESS AUTH CHECKS PASSED")
     print(f"Production configuration written securely to {env_path}")
     print("mode=PRODUCTION_APPROVED production_writes=true max_mutations_per_site=1")
+    print(
+        "openclaw-skillshub remains portfolio-visible and analysis-enabled; "
+        "live writes require a separate GitHub/static-site adapter."
+    )
     return 0
 
 
