@@ -9,25 +9,68 @@ from typing import Any
 
 DEFAULT_PORTFOLIO_SITES: list[dict[str, str]] = [
     {
-        "site": "amfs-teaching",
-        "niche": "teaching resources",
-        "note": "bare Amazon prose is contextual, never tag links",
+        "site_id": "gearuptofit",
+        "site": "gearuptofit.com",
+        "niche": "fitness, running, wearables and nutrition",
+        "gsc_property": "sc-domain:gearuptofit.com",
+        "note": "prioritize indexation recovery and historically valuable URLs",
     },
-    {"site": "mysticaldigits", "niche": "spirituality/numerology", "note": ""},
-    {"site": "frenchyfab.com", "niche": "lifestyle", "note": "CTA box on 5 commercial slugs"},
-    {"site": "micegoneguide.com", "niche": "pest control", "note": ""},
     {
+        "site_id": "affiliatemarketingforsuccess",
+        "site": "affiliatemarketingforsuccess.com",
+        "niche": "affiliate marketing, SEO and AI search visibility",
+        "gsc_property": "sc-domain:affiliatemarketingforsuccess.com",
+        "note": "bare Amazon prose is contextual; never auto-tag prose mentions",
+    },
+    {
+        "site_id": "plantastichaven",
+        "site": "plantastichaven.com",
+        "niche": "houseplants and plant care",
+        "gsc_property": "sc-domain:plantastichaven.com",
+        "note": "static robots; IndexNow active",
+    },
+    {
+        "site_id": "gearuptogrow",
         "site": "gearuptogrow.com",
-        "niche": "gardening/growing",
-        "note": "FAQ schema and title overrides are snippet-managed",
+        "niche": "personal development and growth",
+        "gsc_property": "sc-domain:gearuptogrow.com",
+        "note": "snippet layers may override titles, descriptions and schema",
     },
-    {"site": "plantastichaven.com", "niche": "plants", "note": "static robots, IndexNow active"},
     {
+        "site_id": "mysticaldigits",
+        "site": "mysticaldigits.com",
+        "niche": "numerology",
+        "gsc_property": "sc-domain:mysticaldigits.com",
+        "note": "",
+    },
+    {
+        "site_id": "frenchyfab",
+        "site": "frenchyfab.com",
+        "niche": "French bulldogs",
+        "gsc_property": "sc-domain:frenchyfab.com",
+        "note": "preserve trust and commercial-page UX when monetizing",
+    },
+    {
+        "site_id": "micegoneguide",
+        "site": "micegoneguide.com",
+        "niche": "mouse and pest control",
+        "gsc_property": "sc-domain:micegoneguide.com",
+        "note": "",
+    },
+    {
+        "site_id": "efficientgptprompts",
         "site": "efficientgptprompts.com",
-        "niche": "AI prompts",
+        "niche": "AI prompts and prompt engineering",
+        "gsc_property": "sc-domain:efficientgptprompts.com",
         "note": "code snippets execute in REST context only",
     },
-    {"site": "gearuptofit", "niche": "fitness", "note": ""},
+    {
+        "site_id": "openclaw-skillshub",
+        "site": "openclaw-skillshub.com",
+        "niche": "OpenClaw skills and AI-agent tooling",
+        "gsc_property": "sc-domain:openclaw-skillshub.com",
+        "note": "prioritize crawlability and sitemap integrity before expansion",
+    },
 ]
 
 OPERATING_RULES: tuple[str, ...] = (
@@ -37,7 +80,7 @@ OPERATING_RULES: tuple[str, ...] = (
     "use CF purge_everything (LiteSpeed REST purge is 404).",
     "Never break design, analytics, commerce links, or security. Reversible changes "
     "only unless evidence demands otherwise.",
-    "AMFS is the teaching site: bare Amazon prose there is contextual and must "
+    "On affiliatemarketingforsuccess.com, bare Amazon prose is contextual and must "
     "never be tag-injected.",
     "Snippet layers can override titles, descriptions, and schema — sync every "
     "layer plus Yoast indexables when changing metadata.",
@@ -63,8 +106,12 @@ def format_sites(sites: list[dict[str, str]]) -> str:
     lines = []
     for entry in sites:
         parts = [str(entry.get("site", "?"))]
+        if entry.get("site_id"):
+            parts.append(f"site_id: {entry['site_id']}")
         if entry.get("niche"):
             parts.append(f"niche: {entry['niche']}")
+        if entry.get("gsc_property"):
+            parts.append(f"gsc: {entry['gsc_property']}")
         if entry.get("note"):
             parts.append(f"note: {entry['note']}")
         lines.append(" - " + "; ".join(parts))

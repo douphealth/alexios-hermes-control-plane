@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://postgres:postgres@localhost:5432/hermes_control_plane"
     portfolio_sites_json: str | None = None
 
+    gsc_service_account_file: str | None = None
+    gsc_lookback_days: int = Field(default=28, ge=7, le=90)
+    gsc_row_limit: int = Field(default=250, ge=25, le=25000)
+    gsc_max_sites_per_run: int = Field(default=12, ge=1, le=50)
+
     telegram_bot_token: str | None = None
     telegram_webhook_secret: str | None = None
     telegram_allowed_user_ids: str = ""
