@@ -139,10 +139,22 @@ def _message_candidates(message: dict[str, Any]) -> list[str]:
     return candidates
 
 
+def _validate_schema_value[T: BaseModel](value: object, response_model: type[T]) -> T:
+    """Return a strict canonical model, tolerating only removable provider extra keys."""
+    try:
+        return response_model.model_validate(value)
+    except ValidationError as strict_error:
+        try:
+            normalized = response_model.model_validate(value, extra="ignore")
+            return response_model.model_validate(normalized.model_dump(mode="python"))
+        except ValidationError:
+            raise strict_error
+
+
 def _parse_structured_message[T: BaseModel](
     message: dict[str, Any], response_model: type[T]
 ) -> T:
-    """Accept provider final or reasoning text only when it validates against the schema."""
+    """Accept final/reasoning JSON when it can be canonicalized to the required schema."""
     candidates = _message_candidates(message)
     if not candidates:
         fields = sorted(str(key) for key in message)
@@ -154,9 +166,14 @@ def _parse_structured_message[T: BaseModel](
     last_error: ValidationError | None = None
     for candidate in candidates:
         try:
-            return response_model.model_validate_json(candidate)
-        except ValidationError as exc:
-            last_error = exc
+            parsed_value = json.loads(candidate)
+        except json.JSONDecodeError:
+            parsed_value = None
+        if parsed_value is not None:
+            try:
+                return _validate_schema_value(parsed_value, response_model)
+            except ValidationError as exc:
+                last_error = exc
 
         decoder = json.JSONDecoder()
         for index, char in enumerate(candidate):
@@ -167,7 +184,7 @@ def _parse_structured_message[T: BaseModel](
             except json.JSONDecodeError:
                 continue
             try:
-                return response_model.model_validate(value)
+                return _validate_schema_value(value, response_model)
             except ValidationError as exc:
                 last_error = exc
 
