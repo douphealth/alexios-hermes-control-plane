@@ -36,8 +36,11 @@ fi
 printf 'Validating compose configuration...\n'
 docker compose --env-file "$ENV_FILE" config --quiet
 
-printf 'Building and starting core control-plane services...\n'
-docker compose --env-file "$ENV_FILE" up -d --build postgres temporal api worker
+printf 'Building control-plane application images...\n'
+docker compose --env-file "$ENV_FILE" build api worker scheduler
+
+printf 'Starting core control-plane services...\n'
+docker compose --env-file "$ENV_FILE" up -d postgres temporal api worker
 
 printf 'Repairing rollback backup volume ownership...\n'
 docker compose --env-file "$ENV_FILE" run --rm --no-deps --user 0 worker \
@@ -80,10 +83,22 @@ printf 'Running structured-output provider acceptance...\n'
 docker compose --env-file "$ENV_FILE" exec -T worker \
   ahcp-provider-smoke --mode "$MODE" || fail "provider acceptance failed"
 
-printf 'Starting autonomous scheduler after acceptance gates...\n'
-docker compose --env-file "$ENV_FILE" up -d scheduler
+printf 'Starting freshly rebuilt autonomous scheduler after acceptance gates...\n'
+docker compose --env-file "$ENV_FILE" up -d --force-recreate scheduler
 SCHEDULER_ID="$(docker compose --env-file "$ENV_FILE" ps -q scheduler)"
 [[ -n "$SCHEDULER_ID" ]] || fail "scheduler is not running"
+
+printf 'Verifying scheduler runtime contains exactly-once implementation...\n'
+docker compose --env-file "$ENV_FILE" exec -T scheduler python - <<'PY' \
+  || fail "scheduler runtime does not contain expected exactly-once implementation"
+import inspect
+import alexios_hermes_control_plane.autonomous_scheduler as scheduler
+
+source = inspect.getsource(scheduler)
+required = ("ALLOW_DUPLICATE_FAILED_ONLY", "started=%s")
+if not all(marker in source for marker in required):
+    raise SystemExit(1)
+PY
 
 if [[ "$ENABLED" == "true" ]]; then
   printf 'Verifying autonomous workflow satisfaction...\n'
