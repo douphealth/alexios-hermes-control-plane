@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 
 from temporalio import activity
 
@@ -16,18 +17,14 @@ from alexios_hermes_control_plane.schemas.common import (
 def _eligible_specialist_results(
     specialist_results: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """Return a deep JSON-safe copy containing only decision-eligible findings.
+    """Return a typed deep copy containing only decision-eligible findings.
 
     GROUNDED findings pass unchanged. PARTIAL findings pass with a deterministic 50% confidence
     penalty. UNGROUNDED and UNVERIFIED findings are removed before the judge model is called.
     This makes evidence eligibility an application invariant rather than a prompt preference.
     """
-    sanitized = json.loads(json.dumps(specialist_results, default=str))
-    if not isinstance(sanitized, list):
-        return []
+    sanitized = deepcopy(specialist_results)
     for payload in sanitized:
-        if not isinstance(payload, dict):
-            continue
         findings = payload.get("findings", [])
         if not isinstance(findings, list):
             payload["findings"] = []
@@ -41,7 +38,9 @@ def _eligible_specialist_results(
                 eligible.append(finding)
             elif verdict == "PARTIAL":
                 raw_confidence = finding.get("confidence", 0.0)
-                confidence = float(raw_confidence) if isinstance(raw_confidence, int | float) else 0.0
+                confidence = (
+                    float(raw_confidence) if isinstance(raw_confidence, (int, float)) else 0.0
+                )
                 finding["confidence"] = round(confidence * 0.5, 4)
                 eligible.append(finding)
         payload["findings"] = eligible
@@ -133,9 +132,9 @@ async def run_judge(
 
     eligible_results = _eligible_specialist_results(specialist_results)
     eligible_count = sum(
-        len(item.get("findings", []))
+        len(findings)
         for item in eligible_results
-        if isinstance(item, dict) and isinstance(item.get("findings", []), list)
+        if isinstance((findings := item.get("findings", [])), list)
     )
     if eligible_count == 0:
         return {
