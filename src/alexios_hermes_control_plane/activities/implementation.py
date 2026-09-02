@@ -48,7 +48,7 @@ async def run_implementer(
         response_model=ImplementationPlan,
         prompt_cache_key="ahcp:implementer:v1",
     )
-    plan = invocation.output
+    plan = ImplementationPlan.model_validate(invocation.output)
     allowed_evidence = set(intervention.evidence_ids)
     for mutation in plan.mutations:
         if mutation.site_id != snapshot.site_id:
