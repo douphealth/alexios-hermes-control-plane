@@ -275,7 +275,11 @@ class PortfolioOptimizationWorkflow:
 
 
 def _telegram_summary(result: "PortfolioRunResult") -> str:
-    lines = [f"RUN COMPLETE {result.run_id}", f"Mode: {result.mode.value}", f"Status: {result.status}"]
+    lines = [
+        f"RUN COMPLETE {result.run_id}",
+        f"Mode: {result.mode.value}",
+        f"Status: {result.status}",
+    ]
     if not result.interventions:
         lines.append("No intervention cleared the deterministic evidence/verification gate.")
     for item in result.interventions:
