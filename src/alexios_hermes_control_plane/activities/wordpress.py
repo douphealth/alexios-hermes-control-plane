@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -75,8 +76,9 @@ async def wordpress_read_target(site_id: str, target_url: str) -> dict[str, Any]
     slug = _slug_from_url(target_url)
     fields = "id,link,slug,status,modified_gmt,title,content"
     endpoint = f"{site['base_url']}/wp-json/wp/v2/posts"
+    params = {"slug": slug, "context": "edit", "_fields": fields}
     async with _client(site) as client:
-        response = await client.get(endpoint, params={"slug": slug, "context": "edit", "_fields": fields})
+        response = await client.get(endpoint, params=params)
         response.raise_for_status()
         posts = response.json()
     if not isinstance(posts, list) or len(posts) != 1:
@@ -115,7 +117,10 @@ def _write_allowed(mutation: WordPressMutation) -> None:
     settings = get_settings()
     if mutation.mutation_type == MutationType.TITLE and not settings.wordpress_allow_title_updates:
         raise PermissionError("WordPress title updates are disabled")
-    if mutation.mutation_type == MutationType.CONTENT and not settings.wordpress_allow_content_updates:
+    if (
+        mutation.mutation_type == MutationType.CONTENT
+        and not settings.wordpress_allow_content_updates
+    ):
         raise PermissionError("WordPress content updates are disabled")
 
 
@@ -156,7 +161,8 @@ async def wordpress_apply_mutation(
         response = await client.post(endpoint, json=body)
         response.raise_for_status()
         updated = response.json()
-    after_hash = hashlib.sha256(json.dumps(updated, sort_keys=True, default=str).encode()).hexdigest()
+    encoded = json.dumps(updated, sort_keys=True, default=str).encode()
+    after_hash = hashlib.sha256(encoded).hexdigest()
     receipt = MutationReceipt(
         mutation_id=mutation.mutation_id,
         site_id=mutation.site_id,
@@ -197,9 +203,9 @@ async def wordpress_rollback_mutation(receipt_payload: dict[str, Any]) -> dict[s
     receipt = MutationReceipt.model_validate(receipt_payload)
     if not receipt.backup_path:
         raise ValueError("Rollback receipt has no backup path")
-    snapshot = WordPressSnapshot.model_validate_json(
-        Path(receipt.backup_path).read_text(encoding="utf-8")
-    )
+    backup_path = Path(receipt.backup_path)
+    raw_snapshot = await asyncio.to_thread(backup_path.read_text, encoding="utf-8")
+    snapshot = WordPressSnapshot.model_validate_json(raw_snapshot)
     site = _credentials(snapshot.site_id)
     endpoint = f"{site['base_url']}/wp-json/wp/v2/posts/{snapshot.post_id}"
     body = {"title": snapshot.title_raw, "content": snapshot.content_raw}
