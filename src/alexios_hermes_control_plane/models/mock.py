@@ -7,7 +7,7 @@ from .base import Invocation, ModelAdapter
 T = TypeVar("T", bound=BaseModel)
 
 
-class MockModelAdapter(ModelAdapter):
+class MockModelAdapter[T: BaseModel](ModelAdapter[T]):
     def __init__(self, fixtures: dict[type[BaseModel], BaseModel]) -> None:
         self.fixtures = fixtures
 

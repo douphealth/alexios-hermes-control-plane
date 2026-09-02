@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "alexios-hermes-control-plane"
     max_concurrent_activities: int = Field(default=6, ge=1, le=24)
     database_url: str = "postgresql://postgres:postgres@localhost:5432/hermes_control_plane"
+    portfolio_sites_json: str | None = None
 
     telegram_bot_token: str | None = None
     telegram_webhook_secret: str | None = None

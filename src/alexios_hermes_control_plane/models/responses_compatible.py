@@ -9,7 +9,7 @@ from .base import Invocation, ModelAdapter
 T = TypeVar("T", bound=BaseModel)
 
 
-class ResponsesCompatibleAdapter(ModelAdapter):
+class ResponsesCompatibleAdapter[T: BaseModel](ModelAdapter[T]):
     """OpenAI Responses-compatible adapter using JSON Schema structured output."""
 
     def __init__(
@@ -39,7 +39,13 @@ class ResponsesCompatibleAdapter(ModelAdapter):
             "model": model,
             "instructions": system,
             "input": user,
-            "text": {"format": {"type": "json_schema", "name": response_model.__name__[:64], "schema": schema}},
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": response_model.__name__[:64],
+                    "schema": schema,
+                }
+            },
             "store": False,
         }
         if self.reasoning_effort:
@@ -47,7 +53,9 @@ class ResponsesCompatibleAdapter(ModelAdapter):
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         started = monotonic()
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(f"{self.base_url}/responses", headers=headers, json=payload)
+            response = await client.post(
+                f"{self.base_url}/responses", headers=headers, json=payload
+            )
             response.raise_for_status()
             data = response.json()
         text = _extract_output_text(data)

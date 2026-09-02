@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from pydantic import BaseModel
+
 from alexios_hermes_control_plane.config import Settings
 
 from .base import ModelAdapter
@@ -10,7 +12,7 @@ from .responses_compatible import ResponsesCompatibleAdapter
 
 @dataclass(frozen=True)
 class ModelTarget:
-    adapter: ModelAdapter
+    adapter: ModelAdapter[BaseModel]
     model: str
 
 

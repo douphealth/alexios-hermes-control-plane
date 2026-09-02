@@ -4,7 +4,11 @@ from fastapi import FastAPI, Header, HTTPException, Request, status
 from alexios_hermes_control_plane.config import get_settings
 from alexios_hermes_control_plane.schemas.common import PortfolioRunRequest, RunMode
 from alexios_hermes_control_plane.services.ledger import Ledger
-from alexios_hermes_control_plane.services.telegram import TelegramClient, parse_portfolio_command
+from alexios_hermes_control_plane.services.telegram import (
+    TelegramClient,
+    parse_feedback_command,
+    parse_portfolio_command,
+)
 from alexios_hermes_control_plane.services.temporal import WorkflowService
 
 settings = get_settings()
@@ -57,6 +61,37 @@ async def get_run(run_id: str) -> dict[str, object]:
     return result
 
 
+@app.post("/v1/runs/{run_id}/feedback", status_code=status.HTTP_202_ACCEPTED)
+async def submit_feedback(
+    run_id: str,
+    payload: dict[str, object],
+) -> dict[str, str]:
+    """Operator verdict on a chosen intervention. Feeds the feedback memory that
+    future runs ingest, so prompts compound instead of repeating rejected advice."""
+    rank = payload.get("intervention_rank")
+    verdict = str(payload.get("verdict", ""))
+    outcome_note = payload.get("outcome_note")
+    allowed = {"ADOPTED", "REJECTED", "EXECUTED_VERIFIED", "EXECUTED_NO_SIGNAL", "PARTIAL"}
+    if not isinstance(rank, int) or not 1 <= rank <= 3:
+        raise HTTPException(status_code=422, detail="intervention_rank must be an integer 1-3")
+    if verdict not in allowed:
+        raise HTTPException(status_code=422, detail=f"verdict must be one of {sorted(allowed)}")
+    ledger = Ledger(settings.database_url)
+    try:
+        run = await ledger.get_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        await ledger.record_feedback(
+            run_id,
+            rank,
+            verdict,
+            str(outcome_note) if isinstance(outcome_note, str) and outcome_note else None,
+        )
+    finally:
+        await ledger.close()
+    return {"run_id": run_id, "status": "RECORDED"}
+
+
 @app.post("/telegram/webhook", status_code=status.HTTP_202_ACCEPTED)
 async def telegram_webhook(
     request: Request,
@@ -97,9 +132,36 @@ async def telegram_webhook(
         )
         await TelegramClient(settings.telegram_bot_token or "").send_message(
             chat_id,
-            f"Portfolio run started: {run_id}\nMode: READ_ONLY\nNo production writes are permitted.",
+            f"Portfolio run started: {run_id}\n"
+            "Mode: READ_ONLY\n"
+            "No production writes are permitted.",
         )
         return {"status": "STARTED", "run_id": run_id}
+
+    feedback = parse_feedback_command(text)
+    if feedback is not None:
+        run_prefix, rank, verdict_note = feedback
+        ledger = Ledger(settings.database_url)
+        try:
+            matched_run_id = await ledger.find_run_by_prefix(run_prefix)
+            if matched_run_id is None:
+                await TelegramClient(settings.telegram_bot_token or "").send_message(
+                    chat_id,
+                    f"No run found matching '{run_prefix}'. "
+            "Use the run id from the completion message.",
+                )
+                return {"status": "IGNORED"}
+            verdict = verdict_note.split(maxsplit=1)[0]
+            note = verdict_note[len(verdict):].strip() or None
+            await ledger.record_feedback(matched_run_id, rank, verdict, note)
+        finally:
+            await ledger.close()
+        await TelegramClient(settings.telegram_bot_token or "").send_message(
+            chat_id,
+            f"Feedback recorded for {matched_run_id} (rank {rank}). "
+            "Future runs will factor it in.",
+        )
+        return {"status": "RECORDED"}
 
     return {"status": "IGNORED"}
 

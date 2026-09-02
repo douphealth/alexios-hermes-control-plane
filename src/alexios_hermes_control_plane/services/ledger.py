@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-import asyncpg
+import asyncpg  # type: ignore[import-untyped]
 
 
 class Ledger:
@@ -22,7 +22,7 @@ class Ledger:
         await self.connect()
         assert self._pool is not None
         value = await self._pool.fetchval("SELECT 1")
-        return value == 1
+        return bool(value == 1)
 
     async def create_run(self, run_id: str, objective: str, mode: str) -> None:
         await self.connect()
@@ -86,6 +86,83 @@ class Ledger:
             "created_at": row["created_at"].isoformat(),
             "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
         }
+
+    async def find_run_by_prefix(self, prefix: str) -> str | None:
+        """Resolve a shortened run reference (e.g. the idempotency digest) to a full run_id."""
+        if not prefix:
+            return None
+        await self.connect()
+        assert self._pool is not None
+        row = await self._pool.fetchrow(
+            "SELECT run_id FROM runs WHERE run_id LIKE $1 || '%' ORDER BY created_at DESC LIMIT 1",
+            prefix,
+        )
+        return row["run_id"] if row else None
+
+    async def recent_runs(self, limit: int) -> list[dict[str, Any]]:
+        """Recent completed runs for context injection. Only objective + chosen
+        interventions are surfaced — findings stay out of history to keep payloads small."""
+        await self.connect()
+        assert self._pool is not None
+        rows = await self._pool.fetch(
+            """
+            SELECT run_id, objective, result_json
+            FROM runs
+            WHERE status = 'DONE' AND result_json IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            result = row["result_json"]
+            result = result if isinstance(result, dict) else json.loads(result) if result else {}
+            titles = [
+                str(item.get("title", ""))
+                for item in (result.get("interventions") or [])
+                if isinstance(item, dict)
+            ]
+            out.append(
+                {
+                    "run_id": row["run_id"],
+                    "objective": row["objective"],
+                    "intervention_titles": titles,
+                }
+            )
+        return out
+
+    async def recent_feedback(self, limit: int) -> list[dict[str, Any]]:
+        """Operator verdicts on past interventions — the feedback loop's memory."""
+        await self.connect()
+        assert self._pool is not None
+        rows = await self._pool.fetch(
+            """
+            SELECT run_id, intervention_rank, verdict, outcome_note, metrics_delta
+            FROM intervention_feedback
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+        return [dict(row) for row in rows]
+
+    async def record_feedback(
+        self, run_id: str, intervention_rank: int, verdict: str, outcome_note: str | None
+    ) -> None:
+        await self.connect()
+        assert self._pool is not None
+        await self._pool.execute(
+            """
+            INSERT INTO intervention_feedback(
+                run_id, intervention_rank, verdict, outcome_note
+            ) VALUES($1,$2,$3,$4)
+            """,
+            run_id,
+            intervention_rank,
+            verdict,
+            outcome_note,
+        )
 
 
 def _int_or_none(value: object) -> int | None:

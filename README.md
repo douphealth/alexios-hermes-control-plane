@@ -4,14 +4,27 @@ Durable, API-first orchestration for **Alexios Hermes Intelligence OS**.
 
 Telegram is the human interface, not the inter-agent message bus. Temporal owns durable orchestration and retries. PostgreSQL/pgvector owns machine state. Each model provider sits behind a typed adapter. Agent outputs are schema-validated before they can enter workflow state.
 
-## Current status — v0.1
+## Current status — v0.2
 
 Implemented:
 
 - one Telegram webhook as the operator entry point;
-- one durable Temporal `PortfolioOptimizationWorkflow`;
+- one durable Temporal `PortfolioOptimizationWorkflow` with history-aware context;
 - three specialist calls in parallel: GLM diagnostician, GPT-5.6 Terra strategist, GPT-5.6 Luna state/triage;
-- GPT-5.6 Sol final judge selecting a maximum of three interventions;
+- independent GLM Flash verifier gate: every specialist finding is audited against the evidence
+  set and stamped GROUNDED / PARTIAL / UNGROUNDED before the judge sees it (fail-open);
+- GPT-5.6 Sol final judge selecting a maximum of three interventions, with a deterministic
+  decision score computed in code (impact × confidence × revenue alignment ÷ (effort ×
+  time-to-signal) × reversibility) so rankings are reproducible and prompt versions are
+  comparable experiments;
+- operator feedback loop: `/feedback <run-prefix> <rank> <VERDICT> [note]` on Telegram records
+  verdicts (ADOPTED / REJECTED / EXECUTED_VERIFIED / EXECUTED_NO_SIGNAL / PARTIAL); the last
+  50 verdicts are injected into every future run as feedback memory, so the system stops
+  recommending what the operator keeps rejecting and learns demonstrated preferences;
+- run history injection: the last 10 completed runs' objectives and chosen interventions are
+  part of every run's context, so recommendations do not repeat or contradict recent work;
+- portfolio site registry + operating rules (8 sites, env-overridable via `PORTFOLIO_SITES_JSON`)
+  injected into every agent context — the agents reason over the real portfolio, not a void;
 - native OpenAI Responses API + Pydantic Structured Outputs for Luna/Terra/Sol;
 - DeepSeek Responses API JSON-Schema adapter for `deepseek-v4-flash`;
 - explicit GLM OpenAI-compatible adapter, with no silent provider fallback;
@@ -25,18 +38,19 @@ Implemented:
 
 Intentionally **not** added yet: Redis/Celery, LangGraph, Neo4j, E2B, or autonomous production writes. They are unnecessary until measured evidence proves a need.
 
-## Architecture
+## Architecture (v0.2)
 
 ```text
 Alexios
   |
-Telegram
+Telegram (/portfolio, /feedback)
   |
 FastAPI gateway
   |
 Temporal workflow
+  |-- context: site registry + run history + feedback memory + operating rules
   |-- GLM 5.3 diagnostician -------\
-  |-- GPT-5.6 Terra strategist -----+--> GPT-5.6 Sol judge --> result
+  |-- GPT-5.6 Terra strategist -----+--> GLM 5.3 Flash verifier --> GPT-5.6 Sol judge --> result
   `-- GPT-5.6 Luna state triage ----/
   |
 PostgreSQL + pgvector ledger
@@ -44,7 +58,7 @@ PostgreSQL + pgvector ledger
 Telegram completion notification
 ```
 
-DeepSeek V4 Flash is registered as the implementation engine but deliberately unused in the v0.1 read-only workflow. GLM Flash is registered as the future independent verifier.
+DeepSeek V4 Flash is registered as the implementation engine but deliberately unused in the read-only workflow. GLM 5.3 Flash is now active as the independent verifier.
 
 ## Safety invariants
 
@@ -91,7 +105,17 @@ Telegram:
 
 ```text
 /portfolio Find the three highest-leverage portfolio interventions
+
+/feedback <run-prefix> 1 EXECUTED_VERIFIED clicks +18% on the sitemap fix
 ```
+
+### Feedback loop
+
+Every completion message lists numbered interventions. Reply `/feedback <run-prefix> <rank>
+<VERDICT> [note]` — the run prefix (any unique leading fragment of the run id) is enough.
+Verdicts land in `intervention_feedback`, and the next run's chief-of-staff and judge see the
+last 50 verdicts as ground truth about operator preference and past outcomes. This is how the
+prompt system compounds instead of repeating itself.
 
 ## Model routing
 
@@ -101,7 +125,7 @@ Telegram:
 | strategist | `gpt-5.6-terra` | OpenAI Responses + structured parse |
 | final judge | `gpt-5.6-sol` | OpenAI Responses + structured parse |
 | diagnostician | `glm-5.3` | configured OpenAI-compatible endpoint |
-| verifier (reserved) | `glm-5.3-flash` | configured OpenAI-compatible endpoint |
+| verifier | `glm-5.3-flash` | configured OpenAI-compatible endpoint |
 | implementer (reserved) | `deepseek-v4-flash` | Responses API + JSON Schema |
 
 No role exists until its required credential/endpoint is configured.

@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -28,6 +28,12 @@ class Evidence(StrictModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class VerificationVerdict(StrictModel):
+    finding_id: str
+    verdict: Literal["GROUNDED", "PARTIAL", "UNGROUNDED"]
+    reason: str
+
+
 class Finding(StrictModel):
     finding_id: str
     category: str
@@ -37,6 +43,15 @@ class Finding(StrictModel):
     confidence: float = Field(ge=0, le=1)
     evidence_ids: list[str] = Field(default_factory=list)
     recommended_action: str
+    verification: Literal["GROUNDED", "PARTIAL", "UNGROUNDED", "UNVERIFIED"] = "UNVERIFIED"
+
+
+class InterventionFeedbackItem(StrictModel):
+    run_id: str
+    intervention_rank: int = Field(ge=1, le=3)
+    verdict: Literal["ADOPTED", "REJECTED", "EXECUTED_VERIFIED", "EXECUTED_NO_SIGNAL", "PARTIAL"]
+    outcome_note: str | None = None
+    metrics_delta: dict[str, Any] = Field(default_factory=dict)
 
 
 class SpecialistOutput(StrictModel):
@@ -73,6 +88,23 @@ class Intervention(StrictModel):
     time_to_signal: int = Field(ge=0, le=10)
     evidence_ids: list[str] = Field(default_factory=list)
     expected_signal: str
+    decision_score: float | None = Field(default=None, ge=0, le=100)
+
+
+class VerifierOutput(StrictModel):
+    verdicts: list[VerificationVerdict] = Field(default_factory=list, max_length=40)
+
+
+class PortfolioRunContext(StrictModel):
+    """Context assembled from ledger state and config, injected into all specialists."""
+
+    sites: list[dict[str, str]] = Field(default_factory=list, max_length=50)
+    mode: str = "READ_ONLY"
+    evidence: list[Evidence] = Field(default_factory=list, max_length=100)
+    evidence_note: str = "Stage-1 control-plane run; live evidence connectors are not enabled yet."
+    operating_rules: list[str] = Field(default_factory=list, max_length=30)
+    recent_runs: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
+    feedback_memory: list[InterventionFeedbackItem] = Field(default_factory=list, max_length=50)
 
 
 class JudgeOutput(StrictModel):

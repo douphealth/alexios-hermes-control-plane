@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 from hashlib import sha256
 from uuid import uuid4
 
@@ -42,7 +43,10 @@ class WorkflowService:
         notification_chat_id: int | None = None,
         idempotency_key: str | None = None,
     ) -> str:
-        if request.mode.value == "PRODUCTION_APPROVED" and not self.settings.allow_production_writes:
+        if (
+            request.mode.value == "PRODUCTION_APPROVED"
+            and not self.settings.allow_production_writes
+        ):
             raise PermissionError("Production writes are disabled at the control-plane level")
         client = await _client_manager.get(self.settings)
         workflow_id = _workflow_id(idempotency_key)
@@ -50,15 +54,13 @@ class WorkflowService:
             request=request,
             notification_chat_id=notification_chat_id,
         )
-        try:
+        with suppress(WorkflowAlreadyStartedError):
             await client.start_workflow(
                 PortfolioOptimizationWorkflow.run,
                 payload.model_dump(mode="json"),
                 id=workflow_id,
                 task_queue=self.settings.temporal_task_queue,
             )
-        except WorkflowAlreadyStartedError:
-            pass
         return workflow_id
 
 

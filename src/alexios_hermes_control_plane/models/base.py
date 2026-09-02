@@ -1,14 +1,11 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 
-T = TypeVar("T", bound=BaseModel)
-
 
 @dataclass(frozen=True)
-class Invocation(Generic[T]):
+class Invocation[T: BaseModel]:
     output: T
     provider_request_id: str | None = None
     latency_ms: int | None = None
@@ -17,7 +14,7 @@ class Invocation(Generic[T]):
     total_tokens: int | None = None
 
 
-class ModelAdapter(ABC):
+class ModelAdapter[T: BaseModel](ABC):
     @abstractmethod
     async def invoke_structured(
         self,

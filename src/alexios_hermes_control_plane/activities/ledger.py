@@ -26,3 +26,20 @@ async def ledger_record_agent_result(run_id: str, result: dict[str, object]) -> 
 @activity.defn
 async def ledger_complete_run(run_id: str, status: str, result: dict[str, object]) -> None:
     await _get_ledger().complete_run(run_id, status, result)
+
+
+@activity.defn
+async def ledger_recent_runs(limit: int) -> list[dict[str, object]]:
+    return await _get_ledger().recent_runs(limit)
+
+
+@activity.defn
+async def ledger_recent_feedback(limit: int) -> list[dict[str, object]]:
+    return await _get_ledger().recent_feedback(limit)
+
+
+@activity.defn
+async def ledger_record_feedback(
+    run_id: str, intervention_rank: int, verdict: str, outcome_note: str | None
+) -> None:
+    await _get_ledger().record_feedback(run_id, intervention_rank, verdict, outcome_note)

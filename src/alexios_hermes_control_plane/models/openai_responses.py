@@ -1,5 +1,5 @@
 from time import monotonic
-from typing import TypeVar, cast
+from typing import TypeVar
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -9,7 +9,7 @@ from .base import Invocation, ModelAdapter
 T = TypeVar("T", bound=BaseModel)
 
 
-class OpenAIResponsesAdapter(ModelAdapter):
+class OpenAIResponsesAdapter[T: BaseModel](ModelAdapter[T]):
     """Native OpenAI Responses API adapter with Pydantic Structured Outputs."""
 
     def __init__(
@@ -38,7 +38,7 @@ class OpenAIResponsesAdapter(ModelAdapter):
             instructions=system,
             input=user,
             text_format=response_model,
-            reasoning={"effort": self.reasoning_effort},
+            reasoning={"effort": self.reasoning_effort},  # type: ignore[arg-type]
             store=False,
             prompt_cache_key=prompt_cache_key,
         )
@@ -48,7 +48,7 @@ class OpenAIResponsesAdapter(ModelAdapter):
 
         usage = response.usage
         return Invocation(
-            output=cast(T, parsed),
+            output=parsed,
             provider_request_id=response.id,
             latency_ms=round((monotonic() - started) * 1000),
             input_tokens=getattr(usage, "input_tokens", None) if usage else None,
