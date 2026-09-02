@@ -12,7 +12,7 @@ from alexios_hermes_control_plane.services.telegram import (
 from alexios_hermes_control_plane.services.temporal import WorkflowService
 
 settings = get_settings()
-app = FastAPI(title="Alexios Hermes Control Plane", version="0.1.0")
+app = FastAPI(title="Alexios Hermes Control Plane", version="0.3.0")
 
 
 @app.get("/healthz")
@@ -148,7 +148,7 @@ async def telegram_webhook(
                 await TelegramClient(settings.telegram_bot_token or "").send_message(
                     chat_id,
                     f"No run found matching '{run_prefix}'. "
-            "Use the run id from the completion message.",
+                    "Use the run id from the completion message.",
                 )
                 return {"status": "IGNORED"}
             verdict = verdict_note.split(maxsplit=1)[0]
