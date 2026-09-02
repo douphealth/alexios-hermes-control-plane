@@ -22,6 +22,7 @@ with workflow.unsafe.imports_passed_through():
         ledger_recent_feedback,
         ledger_recent_runs,
         ledger_record_agent_result,
+        ledger_record_evidence,
     )
     from alexios_hermes_control_plane.activities.notifications import notify_telegram
     from alexios_hermes_control_plane.prompts import SPECIALIST_ROLES
@@ -63,6 +64,14 @@ class PortfolioOptimizationWorkflow:
 
         try:
             context = await self._build_context(request)
+            evidence_items = _context_evidence(context)
+            if evidence_items:
+                await workflow.execute_activity(
+                    ledger_record_evidence,
+                    args=[run_id, evidence_items],
+                    start_to_close_timeout=timedelta(seconds=45),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
             history = await self._load_history()
 
             specialist_payloads = await self._run_specialists(
@@ -299,14 +308,18 @@ class PortfolioOptimizationWorkflow:
         return merged
 
 
-def _context_evidence_ids(context: dict[str, object]) -> set[str]:
+def _context_evidence(context: dict[str, object]) -> list[dict[str, object]]:
     evidence = context.get("evidence", [])
     if not isinstance(evidence, list):
-        return set()
+        return []
+    return [item for item in evidence if isinstance(item, dict)]
+
+
+def _context_evidence_ids(context: dict[str, object]) -> set[str]:
     return {
         str(item["evidence_id"])
-        for item in evidence
-        if isinstance(item, dict) and item.get("evidence_id")
+        for item in _context_evidence(context)
+        if item.get("evidence_id")
     }
 
 
