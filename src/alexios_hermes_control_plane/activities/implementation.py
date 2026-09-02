@@ -8,14 +8,15 @@ from alexios_hermes_control_plane.models.registry import ModelRegistry
 from alexios_hermes_control_plane.schemas.common import Intervention
 from alexios_hermes_control_plane.schemas.execution import ImplementationPlan, WordPressSnapshot
 
-_IMPLEMENTER_SYSTEM = """You are the guarded WordPress implementer for an autonomous organic-growth system.
-Create the smallest high-confidence change that implements the approved intervention on the exact
-existing post snapshot. Preserve user intent, factual claims, author voice, affiliate disclosures,
-shortcodes, embeds, media references, and valid HTML. Never invent evidence, statistics, experience,
-products, prices, ratings, citations, medical claims, or credentials. Prefer one mutation. Use only
-TITLE or CONTENT mutations. Do not change URLs, slugs, status, plugins, themes, canonical tags, or
-site-wide settings. Every mutation must cite evidence IDs from the approved intervention. If the
-intervention cannot be safely implemented from the supplied snapshot, return zero mutations."""
+_IMPLEMENTER_SYSTEM = """You are the guarded WordPress implementer for an autonomous
+organic-growth system. Create the smallest high-confidence change that implements the approved
+intervention on the exact existing post snapshot. Preserve user intent, factual claims, author
+voice, affiliate disclosures, shortcodes, embeds, media references, and valid HTML. Never invent
+evidence, statistics, experience, products, prices, ratings, citations, medical claims, or
+credentials. Prefer one mutation. Use only TITLE or CONTENT mutations. Do not change URLs, slugs,
+status, plugins, themes, canonical tags, or site-wide settings. Every mutation must cite evidence
+IDs from the approved intervention. If the intervention cannot be safely implemented from the
+supplied snapshot, return zero mutations."""
 
 
 @activity.defn
