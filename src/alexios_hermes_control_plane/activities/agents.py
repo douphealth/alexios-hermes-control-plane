@@ -132,7 +132,10 @@ async def run_judge(
         )
         scored.append(intervention.model_copy(update={"decision_score": score}))
     ranked = sorted(scored, key=lambda item: (item.decision_score or 0), reverse=True)[:3]
-    reranked = [item.model_copy(update={"rank": index}) for index, item in enumerate(ranked, start=1)]
+    reranked = [
+        item.model_copy(update={"rank": index})
+        for index, item in enumerate(ranked, start=1)
+    ]
     return {
         "judge_output": JudgeOutput(interventions=reranked).model_dump(mode="json"),
         "telemetry": {
