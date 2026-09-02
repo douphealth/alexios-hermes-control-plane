@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from typing import Any
 
 from temporalio import activity
 
@@ -15,8 +16,8 @@ from alexios_hermes_control_plane.schemas.common import (
 
 
 def _eligible_specialist_results(
-    specialist_results: list[dict[str, object]],
-) -> list[dict[str, object]]:
+    specialist_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Return a typed deep copy containing only decision-eligible findings.
 
     GROUNDED findings pass unchanged. PARTIAL findings pass with a deterministic 50% confidence
@@ -29,7 +30,7 @@ def _eligible_specialist_results(
         if not isinstance(findings, list):
             payload["findings"] = []
             continue
-        eligible: list[dict[str, object]] = []
+        eligible: list[dict[str, Any]] = []
         for finding in findings:
             if not isinstance(finding, dict):
                 continue
@@ -55,8 +56,8 @@ def _eligible_specialist_results(
 
 @activity.defn
 async def run_specialist(
-    role: str, objective: str, context: dict[str, object]
-) -> dict[str, object]:
+    role: str, objective: str, context: dict[str, Any]
+) -> dict[str, Any]:
     if role not in SPECIALIST_ROLES:
         raise ValueError(f"Unsupported specialist role: {role}")
     registry = ModelRegistry(get_settings())
@@ -88,8 +89,8 @@ async def run_specialist(
 
 @activity.defn
 async def run_verifier(
-    objective: str, specialist_results: list[dict[str, object]], context: dict[str, object]
-) -> dict[str, object]:
+    objective: str, specialist_results: list[dict[str, Any]], context: dict[str, Any]
+) -> dict[str, Any]:
     """Independent grounding check; returns verdicts without mutating findings."""
     registry = ModelRegistry(get_settings())
     target = registry.get("verifier")
@@ -124,9 +125,9 @@ async def run_verifier(
 @activity.defn
 async def run_judge(
     objective: str,
-    specialist_results: list[dict[str, object]],
-    context: dict[str, object],
-) -> dict[str, object]:
+    specialist_results: list[dict[str, Any]],
+    context: dict[str, Any],
+) -> dict[str, Any]:
     """Final judge with deterministic evidence eligibility and decision scoring."""
     from alexios_hermes_control_plane.services.scoring import decision_score
 
