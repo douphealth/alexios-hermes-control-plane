@@ -116,7 +116,7 @@ class PortfolioRunContext(StrictModel):
 
 
 class JudgeOutput(StrictModel):
-    interventions: list[Intervention] = Field(min_length=1, max_length=3)
+    interventions: list[Intervention] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
     def validate_unique_ranks(self) -> "JudgeOutput":
