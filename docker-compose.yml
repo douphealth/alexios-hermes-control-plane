@@ -47,6 +47,10 @@ services:
     env_file:
       - path: .env
         required: false
+    volumes:
+      # Existing Hermes/GSC credentials remain on the host and are exposed read-only.
+      # Set GSC_SERVICE_ACCOUNT_FILE to the exact matching path under /run/hermes-cache.
+      - ${HOME}/.hermes/cache:/run/hermes-cache:ro
     depends_on:
       temporal:
         condition: service_healthy

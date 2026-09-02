@@ -8,12 +8,14 @@ from alexios_hermes_control_plane.activities.context import (
     load_context_config,
     registry_configured_roles,
 )
+from alexios_hermes_control_plane.activities.evidence import collect_gsc_evidence
 from alexios_hermes_control_plane.activities.ledger import (
     ledger_complete_run,
     ledger_create_run,
     ledger_recent_feedback,
     ledger_recent_runs,
     ledger_record_agent_result,
+    ledger_record_evidence,
     ledger_record_feedback,
 )
 from alexios_hermes_control_plane.activities.notifications import notify_telegram
@@ -34,8 +36,10 @@ async def main() -> None:
             run_judge,
             load_context_config,
             registry_configured_roles,
+            collect_gsc_evidence,
             ledger_create_run,
             ledger_record_agent_result,
+            ledger_record_evidence,
             ledger_complete_run,
             ledger_recent_runs,
             ledger_recent_feedback,

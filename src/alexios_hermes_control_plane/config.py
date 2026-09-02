@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_reasoning: str = "high"
 
+    gsc_service_account_file: str | None = None
+    gsc_days: int = Field(default=28, ge=7, le=90)
+    gsc_data_lag_days: int = Field(default=3, ge=1, le=7)
+    gsc_row_limit: int = Field(default=5000, ge=100, le=25000)
+    gsc_request_timeout_seconds: float = Field(default=30.0, ge=5.0, le=120.0)
+
     allow_production_writes: bool = Field(default=False)
 
     @field_validator("app_env")
@@ -58,6 +64,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def gsc_enabled(self) -> bool:
+        return bool(self.gsc_service_account_file)
 
     def assert_secure_telegram_config(self) -> None:
         if not self.telegram_bot_token:

@@ -50,12 +50,7 @@ async def run_specialist(
 async def run_verifier(
     objective: str, specialist_results: list[dict[str, object]], context: dict[str, object]
 ) -> dict[str, object]:
-    """Independent grounding check. Runs only when the verifier role is configured.
-
-    The verifier never edits findings; it returns per-finding verdicts which the workflow
-    merges into each finding's context before the judge sees it. This function must stay
-    side-effect free apart from telemetry.
-    """
+    """Independent grounding check; returns verdicts without mutating findings."""
     registry = ModelRegistry(get_settings())
     target = registry.get("verifier")
     invocation = await target.adapter.invoke_structured(
@@ -86,18 +81,24 @@ async def run_verifier(
     }
 
 
+def _context_evidence_ids(context: dict[str, object]) -> set[str]:
+    evidence = context.get("evidence", [])
+    if not isinstance(evidence, list):
+        return set()
+    return {
+        str(item["evidence_id"])
+        for item in evidence
+        if isinstance(item, dict) and item.get("evidence_id")
+    }
+
+
 @activity.defn
 async def run_judge(
     objective: str,
     specialist_results: list[dict[str, object]],
     context: dict[str, object],
 ) -> dict[str, object]:
-    """Final judge with deterministic decision scoring.
-
-    The model decides which interventions make the cut; code computes decision_score for
-    each so rankings are reproducible and prompt versions become comparable experiments.
-    The score is written back into each intervention before it is returned or persisted.
-    """
+    """Final judge with code-owned evidence validation, scoring and final rank."""
     from alexios_hermes_control_plane.services.scoring import decision_score
 
     registry = ModelRegistry(get_settings())
@@ -114,8 +115,13 @@ async def run_judge(
         prompt_cache_key=f"ahcp:judge:{PROMPT_VERSION}",
     )
     judge_output = JudgeOutput.model_validate(invocation.output.model_dump())
+    allowed_evidence = _context_evidence_ids(context)
     scored = []
     for intervention in judge_output.interventions:
+        if not intervention.evidence_ids:
+            continue
+        if any(evidence_id not in allowed_evidence for evidence_id in intervention.evidence_ids):
+            continue
         score = decision_score(
             impact=intervention.impact,
             confidence=intervention.confidence,
@@ -125,9 +131,13 @@ async def run_judge(
             time_to_signal=intervention.time_to_signal,
         )
         scored.append(intervention.model_copy(update={"decision_score": score}))
-    ranked = sorted(scored, key=lambda item: (item.decision_score or 0), reverse=True)
+    ranked = sorted(scored, key=lambda item: (item.decision_score or 0), reverse=True)[:3]
+    reranked = [
+        item.model_copy(update={"rank": index})
+        for index, item in enumerate(ranked, start=1)
+    ]
     return {
-        "judge_output": JudgeOutput(interventions=ranked).model_dump(mode="json"),
+        "judge_output": JudgeOutput(interventions=reranked).model_dump(mode="json"),
         "telemetry": {
             "agent": "judge",
             "model": target.model,

@@ -57,6 +57,43 @@ class Ledger:
             json.dumps(result),
         )
 
+    async def record_evidence(self, run_id: str, items: list[dict[str, Any]]) -> None:
+        """Persist immutable evidence IDs while allowing the latest run association to refresh."""
+        if not items:
+            return
+        await self.connect()
+        assert self._pool is not None
+        async with self._pool.acquire() as connection, connection.transaction():
+            for item in items:
+                await connection.execute(
+                    """
+                    INSERT INTO evidence(
+                        evidence_id, run_id, source, site_id, kind, observed_at,
+                        period_start, period_end, source_property, payload_hash,
+                        summary, payload
+                    ) VALUES(
+                        $1,$2,$3,$4,$5,$6::timestamptz,$7::date,$8::date,$9,$10,$11,$12::jsonb
+                    )
+                    ON CONFLICT (evidence_id) DO UPDATE SET
+                        run_id = EXCLUDED.run_id,
+                        observed_at = EXCLUDED.observed_at,
+                        summary = EXCLUDED.summary,
+                        payload = EXCLUDED.payload
+                    """,
+                    str(item["evidence_id"]),
+                    run_id,
+                    str(item["source"]),
+                    str(item["site_id"]),
+                    str(item["kind"]),
+                    str(item["observed_at"]),
+                    _str_or_none(item.get("period_start")),
+                    _str_or_none(item.get("period_end")),
+                    str(item["source_property"]),
+                    str(item["payload_hash"]),
+                    str(item["summary"]),
+                    json.dumps(item.get("payload", {})),
+                )
+
     async def complete_run(self, run_id: str, status: str, result: dict[str, Any]) -> None:
         await self.connect()
         assert self._pool is not None

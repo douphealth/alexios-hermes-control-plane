@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -24,6 +25,13 @@ class AgentStatus(StrEnum):
 class Evidence(StrictModel):
     evidence_id: str
     source: str
+    site_id: str
+    kind: str
+    observed_at: datetime
+    period_start: date | None = None
+    period_end: date | None = None
+    source_property: str
+    payload_hash: str
     summary: str
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -96,19 +104,19 @@ class VerifierOutput(StrictModel):
 
 
 class PortfolioRunContext(StrictModel):
-    """Context assembled from ledger state and config, injected into all specialists."""
+    """Context assembled from ledger state and first-party evidence."""
 
     sites: list[dict[str, str]] = Field(default_factory=list, max_length=50)
     mode: str = "READ_ONLY"
     evidence: list[Evidence] = Field(default_factory=list, max_length=100)
-    evidence_note: str = "Stage-1 control-plane run; live evidence connectors are not enabled yet."
+    evidence_note: str = "No live evidence loaded."
     operating_rules: list[str] = Field(default_factory=list, max_length=30)
     recent_runs: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
     feedback_memory: list[InterventionFeedbackItem] = Field(default_factory=list, max_length=50)
 
 
 class JudgeOutput(StrictModel):
-    interventions: list[Intervention] = Field(min_length=1, max_length=3)
+    interventions: list[Intervention] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
     def validate_unique_ranks(self) -> "JudgeOutput":
