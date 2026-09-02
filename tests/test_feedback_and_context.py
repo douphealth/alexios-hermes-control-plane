@@ -11,16 +11,31 @@ from alexios_hermes_control_plane.prompts.portfolio_context import (
 from alexios_hermes_control_plane.services.telegram import parse_feedback_command
 
 
-def test_default_portfolio_covers_eight_sites() -> None:
-    assert len(DEFAULT_PORTFOLIO_SITES) == 8
-    names = {str(s["site"]) for s in DEFAULT_PORTFOLIO_SITES}
-    assert {"frenchyfab.com", "micegoneguide.com", "gearuptogrow.com"} <= names
+def test_default_portfolio_covers_nine_canonical_sites() -> None:
+    assert len(DEFAULT_PORTFOLIO_SITES) == 9
+    sites = load_portfolio_sites()
+    names = {str(s["domain"]) for s in sites}
+    assert {
+        "affiliatemarketingforsuccess.com",
+        "gearuptofit.com",
+        "plantastichaven.com",
+        "gearuptogrow.com",
+        "mysticaldigits.com",
+        "frenchyfab.com",
+        "micegoneguide.com",
+        "efficientgptprompts.com",
+        "openclaw-skillshub.com",
+    } == names
+    assert len({s["site_id"] for s in sites}) == 9
+    assert all(s["gsc_property"].startswith("sc-domain:") for s in sites)
 
 
-def test_json_override_wins() -> None:
+def test_json_override_is_normalized() -> None:
     override = json.dumps([{"site": "newsite.example", "niche": "test"}])
     sites = load_portfolio_sites(override)
-    assert sites == [{"site": "newsite.example", "niche": "test"}]
+    assert sites[0]["domain"] == "newsite.example"
+    assert sites[0]["site_id"] == "newsite-example"
+    assert sites[0]["gsc_property"] == "sc-domain:newsite.example"
 
 
 def test_invalid_json_override_rejected() -> None:
@@ -31,9 +46,20 @@ def test_invalid_json_override_rejected() -> None:
 
 
 def test_format_sites_includes_notes() -> None:
-    text = format_sites([{"site": "amfs-teaching", "niche": "teaching", "note": "never tag"}])
-    assert "amfs-teaching" in text
-    assert "never tag" in text
+    text = format_sites(
+        [
+            {
+                "site": "affiliatemarketingforsuccess.com",
+                "domain": "affiliatemarketingforsuccess.com",
+                "site_id": "affiliate-marketing-for-success",
+                "niche": "affiliate marketing",
+                "note": "never tag contextual prose",
+            }
+        ]
+    )
+    assert "affiliatemarketingforsuccess.com" in text
+    assert "affiliate-marketing-for-success" in text
+    assert "never tag contextual prose" in text
 
 
 def test_format_feedback_memory_empty_and_present() -> None:
