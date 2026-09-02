@@ -18,6 +18,7 @@ class WordPressTarget(StrictModel):
 class WordPressSnapshot(StrictModel):
     site_id: str
     post_id: int = Field(ge=1)
+    post_type: str = "posts"
     url: str
     slug: str
     status: str
@@ -53,6 +54,7 @@ class MutationReceipt(StrictModel):
     mutation_id: str
     site_id: str
     post_id: int
+    post_type: str = "posts"
     target_url: str
     status: str
     before_sha256: str

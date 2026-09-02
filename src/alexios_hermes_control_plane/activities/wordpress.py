@@ -16,6 +16,8 @@ from alexios_hermes_control_plane.schemas.execution import (
     WordPressSnapshot,
 )
 
+_SUPPORTED_POST_TYPES = ("posts", "pages")
+
 
 def _site_registry() -> dict[str, dict[str, str]]:
     raw = get_settings().wordpress_sites_json
@@ -70,22 +72,37 @@ def _client(site: dict[str, str]) -> httpx.AsyncClient:
     )
 
 
+async def _find_target(
+    client: httpx.AsyncClient,
+    base_url: str,
+    slug: str,
+) -> tuple[str, dict[str, Any]]:
+    fields = "id,link,slug,status,modified_gmt,title,content"
+    matches: list[tuple[str, dict[str, Any]]] = []
+    for post_type in _SUPPORTED_POST_TYPES:
+        endpoint = f"{base_url}/wp-json/wp/v2/{post_type}"
+        params = {"slug": slug, "context": "edit", "_fields": fields}
+        response = await client.get(endpoint, params=params)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise ValueError(f"WordPress returned invalid {post_type} collection")
+        for item in payload:
+            if isinstance(item, dict):
+                matches.append((post_type, item))
+    if len(matches) != 1:
+        raise ValueError(
+            f"Expected exactly one WordPress post/page for slug {slug}; found {len(matches)}"
+        )
+    return matches[0]
+
+
 @activity.defn
 async def wordpress_read_target(site_id: str, target_url: str) -> dict[str, Any]:
     site = _credentials(site_id)
     slug = _slug_from_url(target_url)
-    fields = "id,link,slug,status,modified_gmt,title,content"
-    endpoint = f"{site['base_url']}/wp-json/wp/v2/posts"
-    params = {"slug": slug, "context": "edit", "_fields": fields}
     async with _client(site) as client:
-        response = await client.get(endpoint, params=params)
-        response.raise_for_status()
-        posts = response.json()
-    if not isinstance(posts, list) or len(posts) != 1:
-        raise ValueError(f"Expected exactly one WordPress post for slug {slug}")
-    post = posts[0]
-    if not isinstance(post, dict):
-        raise ValueError("WordPress returned an invalid post payload")
+        post_type, post = await _find_target(client, site["base_url"], slug)
     title = post.get("title")
     content = post.get("content")
     if not isinstance(title, dict) or not isinstance(content, dict):
@@ -93,6 +110,7 @@ async def wordpress_read_target(site_id: str, target_url: str) -> dict[str, Any]
     snapshot = WordPressSnapshot(
         site_id=site_id,
         post_id=int(post["id"]),
+        post_type=post_type,
         url=str(post.get("link") or target_url),
         slug=str(post["slug"]),
         status=str(post["status"]),
@@ -108,7 +126,7 @@ def _backup_snapshot(snapshot: WordPressSnapshot, mutation_id: str) -> str:
     root = Path(settings.wordpress_backup_dir)
     root.mkdir(parents=True, exist_ok=True)
     safe_id = "".join(ch for ch in mutation_id if ch.isalnum() or ch in "-_")[:80]
-    path = root / f"{snapshot.site_id}-{snapshot.post_id}-{safe_id}.json"
+    path = root / f"{snapshot.site_id}-{snapshot.post_type}-{snapshot.post_id}-{safe_id}.json"
     path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
     return str(path)
 
@@ -122,6 +140,12 @@ def _write_allowed(mutation: WordPressMutation) -> None:
         and not settings.wordpress_allow_content_updates
     ):
         raise PermissionError("WordPress content updates are disabled")
+
+
+def _item_endpoint(base_url: str, post_type: str, post_id: int) -> str:
+    if post_type not in _SUPPORTED_POST_TYPES:
+        raise ValueError(f"Unsupported WordPress REST post type: {post_type}")
+    return f"{base_url}/wp-json/wp/v2/{post_type}/{post_id}"
 
 
 @activity.defn
@@ -151,12 +175,12 @@ async def wordpress_apply_mutation(
     if mode == "DRAFT" and snapshot.status == "publish":
         if not settings.wordpress_allow_status_changes:
             raise PermissionError(
-                "DRAFT mode cannot convert a published post while status changes are disabled"
+                "DRAFT mode cannot convert a published item while status changes are disabled"
             )
         body["status"] = "draft"
 
     site = _credentials(mutation.site_id)
-    endpoint = f"{site['base_url']}/wp-json/wp/v2/posts/{mutation.post_id}"
+    endpoint = _item_endpoint(site["base_url"], snapshot.post_type, mutation.post_id)
     async with _client(site) as client:
         response = await client.post(endpoint, json=body)
         response.raise_for_status()
@@ -167,6 +191,7 @@ async def wordpress_apply_mutation(
         mutation_id=mutation.mutation_id,
         site_id=mutation.site_id,
         post_id=mutation.post_id,
+        post_type=snapshot.post_type,
         target_url=mutation.target_url,
         status="APPLIED",
         before_sha256=_hash_snapshot(snapshot),
@@ -183,7 +208,7 @@ async def wordpress_validate_mutation(
     mutation = WordPressMutation.model_validate(mutation_payload)
     receipt = MutationReceipt.model_validate(receipt_payload)
     site = _credentials(mutation.site_id)
-    endpoint = f"{site['base_url']}/wp-json/wp/v2/posts/{mutation.post_id}"
+    endpoint = _item_endpoint(site["base_url"], receipt.post_type, mutation.post_id)
     async with _client(site) as client:
         response = await client.get(endpoint, params={"context": "edit"})
         response.raise_for_status()
@@ -207,7 +232,7 @@ async def wordpress_rollback_mutation(receipt_payload: dict[str, Any]) -> dict[s
     raw_snapshot = await asyncio.to_thread(backup_path.read_text, encoding="utf-8")
     snapshot = WordPressSnapshot.model_validate_json(raw_snapshot)
     site = _credentials(snapshot.site_id)
-    endpoint = f"{site['base_url']}/wp-json/wp/v2/posts/{snapshot.post_id}"
+    endpoint = _item_endpoint(site["base_url"], snapshot.post_type, snapshot.post_id)
     body = {"title": snapshot.title_raw, "content": snapshot.content_raw}
     if get_settings().wordpress_allow_status_changes:
         body["status"] = snapshot.status
