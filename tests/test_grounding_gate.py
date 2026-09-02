@@ -1,4 +1,8 @@
-from alexios_hermes_control_plane.activities.agents import _eligible_specialist_results
+from alexios_hermes_control_plane.activities.agents import (
+    _eligible_specialist_results,
+    _reset_specialist_verification,
+)
+from alexios_hermes_control_plane.schemas.common import SpecialistOutput
 
 
 def _finding(fid: str, verification: str, confidence: float = 0.8) -> dict[str, object]:
@@ -49,3 +53,21 @@ def test_grounding_gate_does_not_mutate_original_payload() -> None:
     findings = original[0]["findings"]
     assert isinstance(findings, list)
     assert findings[0]["confidence"] == 0.8
+
+
+def test_specialist_cannot_self_certify_grounding() -> None:
+    output = SpecialistOutput.model_validate(
+        {
+            "status": "SUCCESS",
+            "summary": "candidate",
+            "findings": [_finding("self-certified", "GROUNDED")],
+            "evidence_ids": ["e1"],
+            "assumptions": [],
+            "error": None,
+        }
+    )
+
+    sanitized = _reset_specialist_verification(output)
+
+    assert sanitized.findings[0].verification == "UNVERIFIED"
+    assert output.findings[0].verification == "GROUNDED"
