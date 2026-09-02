@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test check up down
+.PHONY: install lint typecheck test check up down deploy-readonly
 install:
 	python -m pip install -e '.[dev]'
 lint:
@@ -12,3 +12,5 @@ up:
 	docker compose up --build
 down:
 	docker compose down
+deploy-readonly:
+	bash scripts/deploy-readonly.sh
