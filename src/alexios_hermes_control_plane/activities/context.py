@@ -4,6 +4,8 @@ Workflow code must stay deterministic across replays, so every read of environme
 config, model registry state, or the database goes through these activities.
 """
 
+from typing import Any
+
 from temporalio import activity
 
 from alexios_hermes_control_plane.config import get_settings
@@ -15,7 +17,7 @@ from alexios_hermes_control_plane.prompts.portfolio_context import (
 
 
 @activity.defn
-async def load_context_config(request_sites: list[str]) -> dict[str, object]:
+async def load_context_config(request_sites: list[str]) -> dict[str, Any]:
     """Site registry and operating rules, filtered by the run's requested sites."""
     settings = get_settings()
     sites = load_portfolio_sites(settings.portfolio_sites_json)

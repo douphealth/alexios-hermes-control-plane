@@ -1,3 +1,5 @@
+from typing import Any
+
 from temporalio import activity
 
 from alexios_hermes_control_plane.config import get_settings
@@ -19,22 +21,22 @@ async def ledger_create_run(run_id: str, objective: str, mode: str) -> None:
 
 
 @activity.defn
-async def ledger_record_agent_result(run_id: str, result: dict[str, object]) -> None:
+async def ledger_record_agent_result(run_id: str, result: dict[str, Any]) -> None:
     await _get_ledger().record_agent_result(run_id, result)
 
 
 @activity.defn
-async def ledger_complete_run(run_id: str, status: str, result: dict[str, object]) -> None:
+async def ledger_complete_run(run_id: str, status: str, result: dict[str, Any]) -> None:
     await _get_ledger().complete_run(run_id, status, result)
 
 
 @activity.defn
-async def ledger_recent_runs(limit: int) -> list[dict[str, object]]:
+async def ledger_recent_runs(limit: int) -> list[dict[str, Any]]:
     return await _get_ledger().recent_runs(limit)
 
 
 @activity.defn
-async def ledger_recent_feedback(limit: int) -> list[dict[str, object]]:
+async def ledger_recent_feedback(limit: int) -> list[dict[str, Any]]:
     return await _get_ledger().recent_feedback(limit)
 
 

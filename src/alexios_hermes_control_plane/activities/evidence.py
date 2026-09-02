@@ -149,7 +149,7 @@ def _make_evidence(
 
 
 @activity.defn
-async def collect_gsc_evidence(sites: list[dict[str, str]]) -> dict[str, object]:
+async def collect_gsc_evidence(sites: list[dict[str, str]]) -> dict[str, Any]:
     settings = get_settings()
     if not settings.gsc_service_account_file:
         return {
