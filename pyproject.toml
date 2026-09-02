@@ -34,6 +34,7 @@ dev = [
 ahcp-api = "alexios_hermes_control_plane.api.main:run"
 ahcp-worker = "alexios_hermes_control_plane.worker:run"
 ahcp-autonomous-scheduler = "alexios_hermes_control_plane.autonomous_scheduler:run"
+ahcp-provider-smoke = "alexios_hermes_control_plane.provider_smoke:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/alexios_hermes_control_plane"]
