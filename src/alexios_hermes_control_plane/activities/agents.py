@@ -150,7 +150,8 @@ async def run_specialist(
         response_model=SpecialistOutput,
         prompt_cache_key=f"ahcp:{role}:{PROMPT_VERSION}",
     )
-    output = _force_unverified(invocation.output)
+    typed_output = SpecialistOutput.model_validate(invocation.output)
+    output = _force_unverified(typed_output)
     result = AgentResult(
         **output.model_dump(),
         agent=role,
@@ -184,7 +185,7 @@ async def run_verifier(
         response_model=VerifierOutput,
         prompt_cache_key=f"ahcp:verifier:{PROMPT_VERSION}",
     )
-    output = invocation.output
+    output = VerifierOutput.model_validate(invocation.output)
     telemetry = {
         "agent": "verifier",
         "model": target.model,
@@ -242,7 +243,7 @@ async def run_judge(
         response_model=JudgeOutput,
         prompt_cache_key=f"ahcp:judge:{PROMPT_VERSION}",
     )
-    judge_output = JudgeOutput.model_validate(invocation.output.model_dump())
+    judge_output = JudgeOutput.model_validate(invocation.output)
     scored = []
     for intervention in judge_output.interventions:
         score = decision_score(
