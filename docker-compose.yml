@@ -14,13 +14,12 @@ services:
       timeout: 5s
       retries: 20
 
-  # Official Temporal CLI development server. The old temporalio/auto-setup image is deprecated.
   temporal:
     image: temporalio/temporal:latest
     command: ["server", "start-dev", "--ip", "0.0.0.0", "--ui-port", "8233"]
     ports:
-      - "7233:7233"
-      - "8233:8233"
+      - "127.0.0.1:7233:7233"
+      - "127.0.0.1:8233:8233"
     healthcheck:
       test: ["CMD", "temporal", "workflow", "list", "--address", "localhost:7233", "--limit", "1"]
       interval: 5s
@@ -38,7 +37,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     command: ["ahcp-api"]
     restart: unless-stopped
 
@@ -54,6 +53,7 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - wordpress_backups:/var/lib/ahcp/backups
     depends_on:
       temporal:
         condition: service_healthy
@@ -62,5 +62,19 @@ services:
     command: ["ahcp-worker"]
     restart: unless-stopped
 
+  scheduler:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      temporal:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    command: ["ahcp-autonomous-scheduler"]
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  wordpress_backups:
