@@ -18,6 +18,7 @@ class WordPressTarget(StrictModel):
 class WordPressSnapshot(StrictModel):
     site_id: str
     post_id: int = Field(ge=1)
+    post_type: str = "posts"
     url: str
     slug: str
     status: str
