@@ -205,7 +205,7 @@ class PortfolioOptimizationWorkflow:
         evidence_result, recent_runs_raw, feedback_raw = await asyncio.gather(
             evidence_task, recent_task, feedback_task
         )
-        evidence_bundle = cast(dict[str, object], evidence_result)
+        evidence_bundle = evidence_result
         recent_runs = cast(list[dict[str, Any]], recent_runs_raw)
         feedback_memory = cast(list[dict[str, Any]], feedback_raw)
         evidence = cast(list[dict[str, Any]], evidence_bundle.get("evidence", []))
