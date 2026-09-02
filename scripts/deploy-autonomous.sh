@@ -85,6 +85,25 @@ docker compose --env-file "$ENV_FILE" up -d scheduler
 SCHEDULER_ID="$(docker compose --env-file "$ENV_FILE" ps -q scheduler)"
 [[ -n "$SCHEDULER_ID" ]] || fail "scheduler is not running"
 
+if [[ "$ENABLED" == "true" ]]; then
+  printf 'Verifying first autonomous workflow creation...\n'
+  verified=false
+  for _ in $(seq 1 30); do
+    SCHEDULER_ID="$(docker compose --env-file "$ENV_FILE" ps -q scheduler)"
+    [[ -n "$SCHEDULER_ID" ]] || fail "scheduler exited before workflow creation"
+    if docker compose --env-file "$ENV_FILE" logs --no-color scheduler 2>&1 \
+      | grep -q 'autonomous growth workflow started workflow_id=autonomous-growth-'; then
+      verified=true
+      break
+    fi
+    sleep 2
+  done
+  [[ "$verified" == "true" ]] || {
+    docker compose --env-file "$ENV_FILE" logs --tail=120 scheduler >&2 || true
+    fail "scheduler did not confirm autonomous workflow creation within 60 seconds"
+  }
+fi
+
 docker compose --env-file "$ENV_FILE" ps worker scheduler
 
 printf '\nAUTONOMOUS CONTROL PLANE DEPLOYED\n'

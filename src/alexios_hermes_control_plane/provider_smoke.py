@@ -37,7 +37,17 @@ def _smoke_user(role: str) -> str:
             "and error null."
         )
     if role == "verifier":
-        return "Provider acceptance test. Return a schema-valid verifier result with verdicts []."
+        return (
+            "Provider acceptance test using a realistic verifier payload. Evidence set: "
+            '[{"evidence_id":"smoke_e1","source":"smoke","summary":"robots.txt returned HTTP 200",'
+            '"site_id":"smoke","kind":"technical_health","payload":{}}]. '
+            "Finding to verify: "
+            '[{"finding_id":"smoke_f1","category":"technical","title":"robots reachable",'
+            '"summary":"robots.txt is reachable","impact":1,"confidence":1.0,'
+            '"evidence_ids":["smoke_e1"],"recommended_action":"none",'
+            '"verification":"UNVERIFIED"}]. '
+            "Return exactly one schema-valid verifier verdict for smoke_f1."
+        )
     if role == "judge":
         return "Provider acceptance test. Return a schema-valid judge result with interventions []."
     return (
@@ -59,6 +69,10 @@ async def _check_role(registry: ModelRegistry, role: str) -> dict[str, Any]:
         response_model=response_model,
         prompt_cache_key=f"ahcp:provider-smoke:{role}",
     )
+    if role == "verifier":
+        output = VerifierOutput.model_validate(invocation.output)
+        if len(output.verdicts) != 1 or output.verdicts[0].finding_id != "smoke_f1":
+            raise RuntimeError("Verifier acceptance did not return the required realistic verdict")
     return {
         "role": role,
         "model": target.model,
