@@ -5,11 +5,11 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    from alexios_hermes_control_plane.activities.notifications import notify_telegram
     from alexios_hermes_control_plane.activities.outcomes import (
         list_due_measurements,
         measure_and_record_outcome,
     )
-    from alexios_hermes_control_plane.activities.notifications import notify_telegram
 
 
 @workflow.defn
