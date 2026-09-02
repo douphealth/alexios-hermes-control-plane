@@ -311,7 +311,11 @@ def _context_evidence_ids(context: dict[str, object]) -> set[str]:
 
 
 def _telegram_summary(result: "PortfolioRunResult") -> str:
-    lines = [f"RUN COMPLETE {result.run_id}", f"Mode: {result.mode.value}", f"Status: {result.status}"]
+    lines = [
+        f"RUN COMPLETE {result.run_id}",
+        f"Mode: {result.mode.value}",
+        f"Status: {result.status}",
+    ]
     for item in result.interventions:
         score = f" | score {item.decision_score:.1f}" if item.decision_score is not None else ""
         lines.append(f"{item.rank}. {item.title} — confidence {item.confidence:.0%}{score}")
