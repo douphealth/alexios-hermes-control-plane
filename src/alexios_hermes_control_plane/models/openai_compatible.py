@@ -66,18 +66,16 @@ class OpenAICompatibleAdapter[T: BaseModel](ModelAdapter[T]):
             try:
                 parsed = _parse_structured_message(message, response_model)
             except ValueError:
+                repair_instruction = (
+                    "Your previous response did not validate. Return ONLY one JSON object "
+                    "matching the schema exactly. Do not include prose, markdown, analysis, "
+                    "code fences, or extra keys. Original task follows:\n"
+                )
                 repair_payload = {
                     **payload,
                     "messages": [
                         {"role": "system", "content": system_with_contract},
-                        {
-                            "role": "user",
-                            "content": (
-                                "Your previous response did not validate. Return ONLY one JSON "
-                                "object matching the schema exactly. Do not include prose, markdown, "
-                                "analysis, code fences, or extra keys. Original task follows:\n" + user
-                            ),
-                        },
+                        {"role": "user", "content": repair_instruction + user},
                     ],
                 }
                 data, repair_request_id, repair_usage = await self._post(
