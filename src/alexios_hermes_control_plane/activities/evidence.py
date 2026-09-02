@@ -8,9 +8,10 @@ import glob
 import hashlib
 import json
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
