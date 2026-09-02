@@ -24,13 +24,6 @@ _ROLE_EVIDENCE_KINDS = {
     "strategist": {"search_performance_summary", "top_pages", "top_queries"},
     "verifier": {"search_performance_summary", "top_pages", "top_queries"},
 }
-_CONTEXT_DUPLICATE_KEYS = {
-    "evidence",
-    "sites_display",
-    "operating_rules_display",
-    "recent_runs_display",
-    "feedback_memory_display",
-}
 
 
 def _compact_json(value: Any) -> str:
@@ -70,7 +63,9 @@ def _compact_context_for_role(role: str, context: dict[str, Any]) -> dict[str, A
     }
 
     raw_evidence = context.get("evidence", [])
-    evidence = [item for item in raw_evidence if isinstance(item, dict)] if isinstance(raw_evidence, list) else []
+    evidence: list[dict[str, Any]] = []
+    if isinstance(raw_evidence, list):
+        evidence = [item for item in raw_evidence if isinstance(item, dict)]
 
     if role in {"chief_of_staff", "judge"}:
         compact["evidence"] = [_evidence_summary(item) for item in evidence]
