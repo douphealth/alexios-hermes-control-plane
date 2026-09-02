@@ -11,10 +11,22 @@ from alexios_hermes_control_plane.prompts.portfolio_context import (
 from alexios_hermes_control_plane.services.telegram import parse_feedback_command
 
 
-def test_default_portfolio_covers_eight_sites() -> None:
-    assert len(DEFAULT_PORTFOLIO_SITES) == 8
+def test_default_portfolio_covers_nine_real_sites() -> None:
+    assert len(DEFAULT_PORTFOLIO_SITES) == 9
     names = {str(s["site"]) for s in DEFAULT_PORTFOLIO_SITES}
-    assert {"frenchyfab.com", "micegoneguide.com", "gearuptogrow.com"} <= names
+    assert names == {
+        "gearuptofit.com",
+        "affiliatemarketingforsuccess.com",
+        "plantastichaven.com",
+        "gearuptogrow.com",
+        "mysticaldigits.com",
+        "frenchyfab.com",
+        "micegoneguide.com",
+        "efficientgptprompts.com",
+        "openclaw-skillshub.com",
+    }
+    assert all(str(s.get("site_id", "")) for s in DEFAULT_PORTFOLIO_SITES)
+    assert all(str(s.get("gsc_property", "")).startswith("sc-domain:") for s in DEFAULT_PORTFOLIO_SITES)
 
 
 def test_json_override_wins() -> None:
@@ -30,10 +42,22 @@ def test_invalid_json_override_rejected() -> None:
         load_portfolio_sites("{not json")
 
 
-def test_format_sites_includes_notes() -> None:
-    text = format_sites([{"site": "amfs-teaching", "niche": "teaching", "note": "never tag"}])
-    assert "amfs-teaching" in text
-    assert "never tag" in text
+def test_format_sites_includes_identity_and_notes() -> None:
+    text = format_sites(
+        [
+            {
+                "site_id": "amfs",
+                "site": "affiliatemarketingforsuccess.com",
+                "niche": "affiliate marketing",
+                "gsc_property": "sc-domain:affiliatemarketingforsuccess.com",
+                "note": "never tag prose",
+            }
+        ]
+    )
+    assert "affiliatemarketingforsuccess.com" in text
+    assert "site_id: amfs" in text
+    assert "sc-domain:affiliatemarketingforsuccess.com" in text
+    assert "never tag prose" in text
 
 
 def test_format_feedback_memory_empty_and_present() -> None:
