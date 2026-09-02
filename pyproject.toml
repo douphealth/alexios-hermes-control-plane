@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alexios-hermes-control-plane"
-version = "0.3.0"
+version = "0.4.0"
 description = "Durable API-first orchestration control plane for Alexios Hermes Intelligence OS"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -33,6 +33,7 @@ dev = [
 [project.scripts]
 ahcp-api = "alexios_hermes_control_plane.api.main:run"
 ahcp-worker = "alexios_hermes_control_plane.worker:run"
+ahcp-autonomous-scheduler = "alexios_hermes_control_plane.autonomous_scheduler:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/alexios_hermes_control_plane"]

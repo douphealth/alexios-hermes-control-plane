@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_webhook_secret: str | None = None
     telegram_allowed_user_ids: str = ""
+    autonomous_notification_chat_id: int | None = None
 
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
@@ -49,12 +50,37 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_reasoning: str = "high"
 
+    autonomous_growth_enabled: bool = False
+    autonomous_growth_interval_hours: int = Field(default=24, ge=1, le=168)
+    autonomous_growth_mode: str = "DRAFT"
+    autonomous_growth_objective: str = (
+        "Improve existing portfolio URLs for organic traffic, SEO, GEO, AEO, AI visibility, "
+        "SERP performance, topical authority, user value, and monetization using verified evidence."
+    )
+    autonomous_max_interventions_per_cycle: int = Field(default=3, ge=1, le=10)
+    autonomous_max_mutations_per_site: int = Field(default=1, ge=1, le=5)
+
+    wordpress_sites_json: str | None = None
+    wordpress_request_timeout_seconds: float = Field(default=30.0, ge=5.0, le=120.0)
+    wordpress_allow_content_updates: bool = True
+    wordpress_allow_title_updates: bool = True
+    wordpress_allow_status_changes: bool = False
+    wordpress_backup_dir: str = "/var/lib/ahcp/backups"
+
     allow_production_writes: bool = Field(default=False)
 
     @field_validator("app_env")
     @classmethod
     def normalize_environment(cls, value: str) -> str:
         return value.strip().lower()
+
+    @field_validator("autonomous_growth_mode")
+    @classmethod
+    def validate_autonomous_mode(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in {"READ_ONLY", "DRAFT", "STAGING", "PRODUCTION_APPROVED"}:
+            raise ValueError("AUTONOMOUS_GROWTH_MODE is invalid")
+        return normalized
 
     @property
     def allowed_telegram_users(self) -> set[int]:
@@ -71,6 +97,15 @@ class Settings(BaseSettings):
             raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is required in production")
         if self.is_production and not self.allowed_telegram_users:
             raise RuntimeError("TELEGRAM_ALLOWED_USER_IDS must be explicit in production")
+
+    def assert_autonomous_write_safety(self) -> None:
+        production_requested = self.autonomous_growth_mode == "PRODUCTION_APPROVED"
+        if production_requested and not self.allow_production_writes:
+            raise RuntimeError(
+                "Autonomous production mode requires ALLOW_PRODUCTION_WRITES=true"
+            )
+        if self.autonomous_growth_mode != "READ_ONLY" and not self.wordpress_sites_json:
+            raise RuntimeError("WordPress site credentials are required for autonomous write modes")
 
 
 @lru_cache

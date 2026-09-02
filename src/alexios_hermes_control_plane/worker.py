@@ -9,6 +9,7 @@ from alexios_hermes_control_plane.activities.context import (
     registry_configured_roles,
 )
 from alexios_hermes_control_plane.activities.evidence import collect_gsc_evidence
+from alexios_hermes_control_plane.activities.implementation import run_implementer
 from alexios_hermes_control_plane.activities.ledger import (
     ledger_complete_run,
     ledger_create_run,
@@ -18,7 +19,15 @@ from alexios_hermes_control_plane.activities.ledger import (
     ledger_record_feedback,
 )
 from alexios_hermes_control_plane.activities.notifications import notify_telegram
+from alexios_hermes_control_plane.activities.wordpress import (
+    wordpress_apply_mutation,
+    wordpress_read_target,
+    wordpress_rollback_mutation,
+    wordpress_validate_mutation,
+)
+from alexios_hermes_control_plane.activities.wordpress_registry import wordpress_resolve_site
 from alexios_hermes_control_plane.config import get_settings
+from alexios_hermes_control_plane.workflows.autonomous import AutonomousGrowthWorkflow
 from alexios_hermes_control_plane.workflows.portfolio import PortfolioOptimizationWorkflow
 
 
@@ -28,11 +37,12 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
-        workflows=[PortfolioOptimizationWorkflow],
+        workflows=[PortfolioOptimizationWorkflow, AutonomousGrowthWorkflow],
         activities=[
             run_specialist,
             run_verifier,
             run_judge,
+            run_implementer,
             load_context_config,
             registry_configured_roles,
             collect_gsc_evidence,
@@ -43,6 +53,11 @@ async def main() -> None:
             ledger_recent_feedback,
             ledger_record_feedback,
             notify_telegram,
+            wordpress_resolve_site,
+            wordpress_read_target,
+            wordpress_apply_mutation,
+            wordpress_validate_mutation,
+            wordpress_rollback_mutation,
         ],
         max_concurrent_activities=settings.max_concurrent_activities,
     )

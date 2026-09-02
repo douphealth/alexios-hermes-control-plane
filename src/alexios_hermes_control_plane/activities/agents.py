@@ -93,12 +93,7 @@ def _compact_context_for_role(role: str, context: dict[str, Any]) -> dict[str, A
 def _eligible_specialist_results(
     specialist_results: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Return a typed deep copy containing only decision-eligible findings.
-
-    GROUNDED findings pass unchanged. PARTIAL findings pass with a deterministic 50% confidence
-    penalty. UNGROUNDED and UNVERIFIED findings are removed before the judge model is called.
-    This makes evidence eligibility an application invariant rather than a prompt preference.
-    """
+    """Return only findings independently cleared by the verifier."""
     sanitized = deepcopy(specialist_results)
     for payload in sanitized:
         findings = payload.get("findings", [])
@@ -129,6 +124,16 @@ def _eligible_specialist_results(
     return sanitized
 
 
+def _force_unverified(output: SpecialistOutput) -> SpecialistOutput:
+    """Specialists may propose findings, but only the independent verifier can ground them."""
+    copied = output.model_copy(deep=True)
+    copied.findings = [
+        finding.model_copy(update={"verification": "UNVERIFIED"})
+        for finding in copied.findings
+    ]
+    return copied
+
+
 @activity.defn
 async def run_specialist(
     role: str, objective: str, context: dict[str, Any]
@@ -141,14 +146,12 @@ async def run_specialist(
     invocation = await target.adapter.invoke_structured(
         model=target.model,
         system=ROLE_PROMPTS[role],
-        user=(
-            f"Objective: {objective}\n"
-            f"Context JSON: {_compact_json(model_context)}"
-        ),
+        user=(f"Objective: {objective}\n" f"Context JSON: {_compact_json(model_context)}"),
         response_model=SpecialistOutput,
         prompt_cache_key=f"ahcp:{role}:{PROMPT_VERSION}",
     )
-    output = invocation.output
+    typed_output = SpecialistOutput.model_validate(invocation.output)
+    output = _force_unverified(typed_output)
     result = AgentResult(
         **output.model_dump(),
         agent=role,
@@ -182,7 +185,7 @@ async def run_verifier(
         response_model=VerifierOutput,
         prompt_cache_key=f"ahcp:verifier:{PROMPT_VERSION}",
     )
-    output = invocation.output
+    output = VerifierOutput.model_validate(invocation.output)
     telemetry = {
         "agent": "verifier",
         "model": target.model,
@@ -193,10 +196,7 @@ async def run_verifier(
         "output_tokens": invocation.output_tokens,
         "total_tokens": invocation.total_tokens,
     }
-    return {
-        "verifier_output": output.model_dump(mode="json"),
-        "telemetry": telemetry,
-    }
+    return {"verifier_output": output.model_dump(mode="json"), "telemetry": telemetry}
 
 
 @activity.defn
@@ -243,7 +243,7 @@ async def run_judge(
         response_model=JudgeOutput,
         prompt_cache_key=f"ahcp:judge:{PROMPT_VERSION}",
     )
-    judge_output = JudgeOutput.model_validate(invocation.output.model_dump())
+    judge_output = JudgeOutput.model_validate(invocation.output)
     scored = []
     for intervention in judge_output.interventions:
         score = decision_score(
