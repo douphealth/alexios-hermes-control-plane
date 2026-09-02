@@ -47,6 +47,13 @@ services:
     env_file:
       - path: .env
         required: false
+    volumes:
+      - type: bind
+        source: ${GSC_SERVICE_ACCOUNT_HOST_FILE:-./secrets/gsc-service-account.json}
+        target: /run/secrets/gsc-service-account.json
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       temporal:
         condition: service_healthy
