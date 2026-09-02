@@ -19,6 +19,14 @@ from alexios_hermes_control_plane.activities.ledger import (
     ledger_record_feedback,
 )
 from alexios_hermes_control_plane.activities.notifications import notify_telegram
+from alexios_hermes_control_plane.activities.outcomes import (
+    capture_gsc_baselines,
+    list_due_measurements,
+    measure_and_record_outcome,
+    recent_outcome_memory,
+    record_autonomous_mutation,
+)
+from alexios_hermes_control_plane.activities.technical_evidence import collect_technical_evidence
 from alexios_hermes_control_plane.activities.wordpress import (
     wordpress_apply_mutation,
     wordpress_read_target,
@@ -28,6 +36,7 @@ from alexios_hermes_control_plane.activities.wordpress import (
 from alexios_hermes_control_plane.activities.wordpress_registry import wordpress_resolve_site
 from alexios_hermes_control_plane.config import get_settings
 from alexios_hermes_control_plane.workflows.autonomous import AutonomousGrowthWorkflow
+from alexios_hermes_control_plane.workflows.measurement import OutcomeMeasurementWorkflow
 from alexios_hermes_control_plane.workflows.portfolio import PortfolioOptimizationWorkflow
 
 
@@ -37,7 +46,11 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
-        workflows=[PortfolioOptimizationWorkflow, AutonomousGrowthWorkflow],
+        workflows=[
+            PortfolioOptimizationWorkflow,
+            AutonomousGrowthWorkflow,
+            OutcomeMeasurementWorkflow,
+        ],
         activities=[
             run_specialist,
             run_verifier,
@@ -46,6 +59,12 @@ async def main() -> None:
             load_context_config,
             registry_configured_roles,
             collect_gsc_evidence,
+            collect_technical_evidence,
+            capture_gsc_baselines,
+            record_autonomous_mutation,
+            list_due_measurements,
+            measure_and_record_outcome,
+            recent_outcome_memory,
             ledger_create_run,
             ledger_record_agent_result,
             ledger_complete_run,

@@ -24,6 +24,10 @@ with workflow.unsafe.imports_passed_through():
         ledger_record_agent_result,
     )
     from alexios_hermes_control_plane.activities.notifications import notify_telegram
+    from alexios_hermes_control_plane.activities.outcomes import recent_outcome_memory
+    from alexios_hermes_control_plane.activities.technical_evidence import (
+        collect_technical_evidence,
+    )
     from alexios_hermes_control_plane.prompts import PROMPT_VERSION, SPECIALIST_ROLES
     from alexios_hermes_control_plane.prompts.portfolio_context import (
         format_feedback_memory,
@@ -188,34 +192,58 @@ class PortfolioOptimizationWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=3),
             ),
         )
+        outcome_memory = cast(
+            list[dict[str, Any]],
+            await workflow.execute_activity(
+                recent_outcome_memory,
+                args=[30],
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            ),
+        )
         config_sites = cast(list[dict[str, str]], config["sites"])
         config_rules = cast(list[str], config["operating_rules"])
-        evidence_result = cast(
-            dict[str, Any],
-            await workflow.execute_activity(
+        gsc_result, technical_result = await asyncio.gather(
+            workflow.execute_activity(
                 collect_gsc_evidence,
                 args=[config_sites],
                 start_to_close_timeout=timedelta(minutes=3),
                 retry_policy=RetryPolicy(maximum_attempts=2),
             ),
+            workflow.execute_activity(
+                collect_technical_evidence,
+                args=[config_sites],
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            ),
         )
-        evidence = cast(list[dict[str, Any]], evidence_result.get("evidence", []))
-        note = str(evidence_result.get("note", "GSC evidence collection returned no note."))
-        errors = cast(list[str], evidence_result.get("errors", []))
+        gsc = cast(dict[str, Any], gsc_result)
+        technical = cast(dict[str, Any], technical_result)
+        gsc_evidence = cast(list[dict[str, Any]], gsc.get("evidence", []))
+        technical_evidence = cast(list[dict[str, Any]], technical.get("evidence", []))
+        evidence = gsc_evidence + technical_evidence
+        notes = [
+            str(gsc.get("note", "GSC evidence collection returned no note.")),
+            str(technical.get("note", "Technical evidence collection returned no note.")),
+        ]
+        errors = cast(list[str], gsc.get("errors", [])) + cast(
+            list[str], technical.get("errors", [])
+        )
         if errors:
-            note += " Connector errors: " + " | ".join(errors[:10])
+            notes.append("Connector errors: " + " | ".join(errors[:10]))
         return {
             "sites": config_sites,
             "sites_display": format_sites(config_sites),
             "mode": request.mode.value,
             "evidence": evidence,
-            "evidence_note": note,
+            "evidence_note": " ".join(notes),
             "operating_rules": config_rules,
             "operating_rules_display": format_operating_rules(tuple(config_rules)),
             "recent_runs": recent_runs,
             "recent_runs_display": format_recent_runs(recent_runs),
             "feedback_memory": feedback_memory,
             "feedback_memory_display": format_feedback_memory(feedback_memory),
+            "outcome_memory": outcome_memory,
         }
 
     async def _load_history(self) -> dict[str, Any]:

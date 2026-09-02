@@ -20,9 +20,19 @@ _ROLE_ROW_LIMITS = {
     "verifier": 12,
 }
 _ROLE_EVIDENCE_KINDS = {
-    "diagnostician": {"search_performance_summary", "top_pages"},
-    "strategist": {"search_performance_summary", "top_pages", "top_queries"},
-    "verifier": {"search_performance_summary", "top_pages", "top_queries"},
+    "diagnostician": {"search_performance_summary", "top_pages", "technical_health"},
+    "strategist": {
+        "search_performance_summary",
+        "top_pages",
+        "top_queries",
+        "technical_health",
+    },
+    "verifier": {
+        "search_performance_summary",
+        "top_pages",
+        "top_queries",
+        "technical_health",
+    },
 }
 
 
@@ -53,6 +63,11 @@ def _compact_evidence_item(item: dict[str, Any], row_limit: int) -> dict[str, An
     return compact
 
 
+def _bounded_list(context: dict[str, Any], key: str, limit: int) -> list[Any]:
+    value = context.get(key, [])
+    return deepcopy(value[:limit]) if isinstance(value, list) else []
+
+
 def _compact_context_for_role(role: str, context: dict[str, Any]) -> dict[str, Any]:
     """Return a small role-specific model context while preserving evidence provenance."""
     compact: dict[str, Any] = {
@@ -77,15 +92,14 @@ def _compact_context_for_role(role: str, context: dict[str, Any]) -> dict[str, A
         compact["evidence"] = [_compact_evidence_item(item, row_limit) for item in evidence]
 
     if role == "strategist":
-        recent_runs = context.get("recent_runs", [])
-        compact["recent_runs"] = deepcopy(recent_runs[:3]) if isinstance(recent_runs, list) else []
+        compact["recent_runs"] = _bounded_list(context, "recent_runs", 3)
+        compact["outcome_memory"] = _bounded_list(context, "outcome_memory", 10)
     elif role == "chief_of_staff":
-        recent_runs = context.get("recent_runs", [])
-        feedback_memory = context.get("feedback_memory", [])
-        compact["recent_runs"] = deepcopy(recent_runs[:5]) if isinstance(recent_runs, list) else []
-        compact["feedback_memory"] = (
-            deepcopy(feedback_memory[:10]) if isinstance(feedback_memory, list) else []
-        )
+        compact["recent_runs"] = _bounded_list(context, "recent_runs", 5)
+        compact["feedback_memory"] = _bounded_list(context, "feedback_memory", 10)
+        compact["outcome_memory"] = _bounded_list(context, "outcome_memory", 15)
+    elif role == "judge":
+        compact["outcome_memory"] = _bounded_list(context, "outcome_memory", 10)
 
     return compact
 

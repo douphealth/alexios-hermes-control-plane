@@ -7,6 +7,10 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from alexios_hermes_control_plane.activities.implementation import run_implementer
     from alexios_hermes_control_plane.activities.notifications import notify_telegram
+    from alexios_hermes_control_plane.activities.outcomes import (
+        capture_gsc_baselines,
+        record_autonomous_mutation,
+    )
     from alexios_hermes_control_plane.activities.wordpress import (
         wordpress_apply_mutation,
         wordpress_read_target,
@@ -99,11 +103,22 @@ class AutonomousGrowthWorkflow:
                     for mutation in plan.mutations:
                         if site_mutations.get(site_id, 0) >= max_mutations_per_site:
                             break
-                        apply_args = [
-                            mutation.model_dump(mode="json"),
-                            snapshot,
-                            requested_mode.value,
-                        ]
+                        baseline: dict[str, Any] = {}
+                        try:
+                            baseline = cast(
+                                dict[str, Any],
+                                await workflow.execute_activity(
+                                    capture_gsc_baselines,
+                                    args=[site_id, mutation.target_url],
+                                    start_to_close_timeout=timedelta(minutes=2),
+                                    retry_policy=retry,
+                                ),
+                            )
+                        except Exception:
+                            baseline = {}
+
+                        mutation_payload = mutation.model_dump(mode="json")
+                        apply_args = [mutation_payload, snapshot, requested_mode.value]
                         applied_payload = cast(
                             dict[str, Any],
                             await workflow.execute_activity(
@@ -119,7 +134,7 @@ class AutonomousGrowthWorkflow:
                                 dict[str, Any],
                                 await workflow.execute_activity(
                                     wordpress_validate_mutation,
-                                    args=[mutation.model_dump(mode="json"), applied_payload],
+                                    args=[mutation_payload, applied_payload],
                                     start_to_close_timeout=timedelta(minutes=1),
                                     retry_policy=retry,
                                 ),
@@ -128,6 +143,17 @@ class AutonomousGrowthWorkflow:
                             if validated.status != "VALIDATED":
                                 error = validated.validation_error or "validation failed"
                                 raise RuntimeError(error)
+                            await workflow.execute_activity(
+                                record_autonomous_mutation,
+                                args=[
+                                    workflow_id,
+                                    mutation_payload,
+                                    validated.model_dump(mode="json"),
+                                    baseline,
+                                ],
+                                start_to_close_timeout=timedelta(seconds=30),
+                                retry_policy=RetryPolicy(maximum_attempts=3),
+                            )
                             receipts.append(validated.model_dump(mode="json"))
                             site_mutations[site_id] = site_mutations.get(site_id, 0) + 1
                         except Exception as exc:
@@ -141,6 +167,12 @@ class AutonomousGrowthWorkflow:
                                 ),
                             )
                             rolled_back["validation_error"] = str(exc)[:1000]
+                            await workflow.execute_activity(
+                                record_autonomous_mutation,
+                                args=[workflow_id, mutation_payload, rolled_back, baseline],
+                                start_to_close_timeout=timedelta(seconds=30),
+                                retry_policy=RetryPolicy(maximum_attempts=3),
+                            )
                             receipts.append(rolled_back)
                 except Exception as exc:
                     plans.append(
