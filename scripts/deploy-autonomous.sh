@@ -39,6 +39,10 @@ docker compose --env-file "$ENV_FILE" config --quiet
 printf 'Building and starting core control-plane services...\n'
 docker compose --env-file "$ENV_FILE" up -d --build postgres temporal api worker
 
+printf 'Repairing rollback backup volume ownership...\n'
+docker compose --env-file "$ENV_FILE" run --rm --no-deps --user 0 worker \
+  sh -c 'mkdir -p /var/lib/ahcp/backups && chown -R 10001:10001 /var/lib/ahcp/backups'
+
 printf 'Applying idempotent database migrations...\n'
 for migration in db/migrations/*.sql; do
   name="$(basename "$migration")"
