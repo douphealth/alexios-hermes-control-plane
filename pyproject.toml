@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "alexios-hermes-control-plane"
-version = "0.1.0"
+version = "0.3.0"
 description = "Durable API-first orchestration control plane for Alexios Hermes Intelligence OS"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,6 +19,7 @@ dependencies = [
   "pydantic-settings>=2.10,<3",
   "httpx>=0.28,<1",
   "asyncpg>=0.30,<1",
+  "google-auth[requests]>=2.40,<3",
 ]
 
 [project.optional-dependencies]
