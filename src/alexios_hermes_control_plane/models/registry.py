@@ -41,12 +41,20 @@ class ModelRegistry:
 
         if s.glm_base_url and s.glm_api_key:
             self._targets["diagnostician"] = ModelTarget(
-                OpenAICompatibleAdapter(base_url=s.glm_base_url, api_key=s.glm_api_key),
+                OpenAICompatibleAdapter(
+                    base_url=s.glm_base_url,
+                    api_key=s.glm_api_key,
+                    reasoning_effort="low",
+                ),
                 s.glm_model,
             )
         if s.glm_flash_base_url and s.glm_flash_api_key:
             self._targets["verifier"] = ModelTarget(
-                OpenAICompatibleAdapter(base_url=s.glm_flash_base_url, api_key=s.glm_flash_api_key),
+                OpenAICompatibleAdapter(
+                    base_url=s.glm_flash_base_url,
+                    api_key=s.glm_flash_api_key,
+                    reasoning_effort="low",
+                ),
                 s.glm_flash_model,
             )
         if s.deepseek_api_key:
