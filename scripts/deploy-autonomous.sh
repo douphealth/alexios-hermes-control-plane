@@ -45,10 +45,11 @@ docker compose --env-file "$ENV_FILE" run --rm --no-deps --user 0 worker \
 
 printf 'Applying idempotent database migrations...\n'
 for migration in db/migrations/*.sql; do
+  [[ -f "$migration" ]] || fail "migration file missing: $migration"
   name="$(basename "$migration")"
   docker compose --env-file "$ENV_FILE" exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U postgres -d hermes_control_plane \
-    -f "/docker-entrypoint-initdb.d/$name" >/dev/null
+    < "$migration" >/dev/null
   printf '  applied %s\n' "$name"
 done
 
