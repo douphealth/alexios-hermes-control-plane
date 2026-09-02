@@ -15,6 +15,7 @@ from alexios_hermes_control_plane.activities.ledger import (
     ledger_recent_feedback,
     ledger_recent_runs,
     ledger_record_agent_result,
+    ledger_record_evidence,
     ledger_record_feedback,
 )
 from alexios_hermes_control_plane.activities.notifications import notify_telegram
@@ -38,6 +39,7 @@ async def main() -> None:
             collect_gsc_evidence,
             ledger_create_run,
             ledger_record_agent_result,
+            ledger_record_evidence,
             ledger_complete_run,
             ledger_recent_runs,
             ledger_recent_feedback,
