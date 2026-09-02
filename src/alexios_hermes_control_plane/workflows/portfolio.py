@@ -15,6 +15,7 @@ with workflow.unsafe.imports_passed_through():
         load_context_config,
         registry_configured_roles,
     )
+    from alexios_hermes_control_plane.activities.evidence import collect_gsc_evidence
     from alexios_hermes_control_plane.activities.ledger import (
         ledger_complete_run,
         ledger_create_run,
@@ -36,6 +37,10 @@ with workflow.unsafe.imports_passed_through():
         PortfolioRunRequest,
         PortfolioRunResult,
         PortfolioWorkflowInput,
+    )
+    from alexios_hermes_control_plane.services.grounding import (
+        eligible_finding_count,
+        filter_grounded_payloads,
     )
 
 
@@ -76,9 +81,21 @@ class PortfolioOptimizationWorkflow:
                     retry_policy=retry,
                 )
 
+            evidence_ids = _context_evidence_ids(context)
+            judge_safe_payloads = filter_grounded_payloads(specialist_payloads, evidence_ids)
+            if eligible_finding_count(judge_safe_payloads) == 0:
+                run_result = PortfolioRunResult(
+                    run_id=run_id,
+                    mode=request.mode,
+                    status="NEEDS_DATA",
+                    interventions=[],
+                    specialist_results=specialist_results,
+                )
+                return await self._complete(run_result, workflow_input.notification_chat_id, retry)
+
             judge_payload = await workflow.execute_activity(
                 run_judge,
-                args=[request.objective, specialist_payloads, context],
+                args=[request.objective, judge_safe_payloads, context],
                 start_to_close_timeout=agent_timeout,
                 retry_policy=retry,
             )
@@ -86,10 +103,16 @@ class PortfolioOptimizationWorkflow:
             judge_telemetry = cast(dict[str, object], judge_payload["telemetry"])
             judge_record: dict[str, object] = {
                 **judge_telemetry,
-                "status": "SUCCESS",
+                "status": "SUCCESS" if judge_output.interventions else "NEEDS_DATA",
                 "summary": f"Selected {len(judge_output.interventions)} interventions",
                 "findings": [],
-                "evidence_ids": [],
+                "evidence_ids": sorted(
+                    {
+                        evidence_id
+                        for item in judge_output.interventions
+                        for evidence_id in item.evidence_ids
+                    }
+                ),
                 "assumptions": [],
                 "error": None,
             }
@@ -103,25 +126,11 @@ class PortfolioOptimizationWorkflow:
             run_result = PortfolioRunResult(
                 run_id=run_id,
                 mode=request.mode,
-                status="DONE",
+                status="DONE" if judge_output.interventions else "NEEDS_DATA",
                 interventions=judge_output.interventions,
                 specialist_results=specialist_results,
             )
-            payload = run_result.model_dump(mode="json")
-            await workflow.execute_activity(
-                ledger_complete_run,
-                args=[run_id, "DONE", payload],
-                start_to_close_timeout=timedelta(seconds=30),
-                retry_policy=retry,
-            )
-            if workflow_input.notification_chat_id is not None:
-                await workflow.execute_activity(
-                    notify_telegram,
-                    args=[workflow_input.notification_chat_id, _telegram_summary(run_result)],
-                    start_to_close_timeout=timedelta(seconds=30),
-                    retry_policy=RetryPolicy(maximum_attempts=3),
-                )
-            return payload
+            return await self._complete(run_result, workflow_input.notification_chat_id, retry)
         except Exception as exc:
             failure = {"run_id": run_id, "status": "FAILED", "error": str(exc)[:2000]}
             await workflow.execute_activity(
@@ -142,38 +151,75 @@ class PortfolioOptimizationWorkflow:
                 )
             raise
 
+    async def _complete(
+        self,
+        run_result: PortfolioRunResult,
+        notification_chat_id: int | None,
+        retry: RetryPolicy,
+    ) -> dict[str, object]:
+        payload = run_result.model_dump(mode="json")
+        await workflow.execute_activity(
+            ledger_complete_run,
+            args=[run_result.run_id, run_result.status, payload],
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=retry,
+        )
+        if notification_chat_id is not None:
+            await workflow.execute_activity(
+                notify_telegram,
+                args=[notification_chat_id, _telegram_summary(run_result)],
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+        return payload
+
     async def _build_context(self, request: PortfolioRunRequest) -> dict[str, object]:
-        """Assemble the run context via activities (config + history are never read in
-        workflow code, keeping the workflow deterministic across replays)."""
+        """Assemble config, first-party evidence and memory via replay-safe activities."""
         config = await workflow.execute_activity(
             load_context_config,
             args=[request.sites],
             start_to_close_timeout=timedelta(seconds=15),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
-        recent_runs = cast(list[dict[str, Any]], await workflow.execute_activity(
+        config_sites = cast(list[dict[str, str]], config["sites"])
+        config_rules = cast(list[str], config["operating_rules"])
+
+        evidence_task = workflow.execute_activity(
+            collect_gsc_evidence,
+            args=[config_sites],
+            start_to_close_timeout=timedelta(minutes=3),
+            retry_policy=RetryPolicy(maximum_attempts=2),
+        )
+        recent_task = workflow.execute_activity(
             ledger_recent_runs,
             args=[10],
             start_to_close_timeout=timedelta(seconds=30),
             retry_policy=RetryPolicy(maximum_attempts=3),
-        ))
-        feedback_memory = cast(list[dict[str, Any]], await workflow.execute_activity(
+        )
+        feedback_task = workflow.execute_activity(
             ledger_recent_feedback,
             args=[50],
             start_to_close_timeout=timedelta(seconds=30),
             retry_policy=RetryPolicy(maximum_attempts=3),
-        ))
-        config_sites = cast(list[dict[str, str]], config["sites"])
-        config_rules = cast(list[str], config["operating_rules"])
+        )
+        evidence_result, recent_runs_raw, feedback_raw = await asyncio.gather(
+            evidence_task, recent_task, feedback_task
+        )
+        evidence_bundle = cast(dict[str, object], evidence_result)
+        recent_runs = cast(list[dict[str, Any]], recent_runs_raw)
+        feedback_memory = cast(list[dict[str, Any]], feedback_raw)
+        evidence = cast(list[dict[str, Any]], evidence_bundle.get("evidence", []))
+        evidence_note = str(evidence_bundle.get("note", "No live evidence loaded."))
+        evidence_errors = cast(list[str], evidence_bundle.get("errors", []))
+        if evidence_errors:
+            evidence_note += " Errors: " + " | ".join(evidence_errors[:10])
+
         return {
             "sites": config_sites,
             "sites_display": format_sites(config_sites),
             "mode": request.mode.value,
-            "evidence": [],
-            "evidence_note": (
-                "Stage-1 control-plane run; live evidence connectors are not enabled yet. "
-                "Treat absence of evidence as NEEDS_DATA, not as permission to speculate."
-            ),
+            "evidence": evidence,
+            "evidence_note": evidence_note,
             "operating_rules": config_rules,
             "operating_rules_display": format_operating_rules(tuple(config_rules)),
             "recent_runs": recent_runs,
@@ -212,15 +258,16 @@ class PortfolioOptimizationWorkflow:
         retry: RetryPolicy,
         agent_timeout: timedelta,
     ) -> list[dict[str, object]]:
-        """Independent evidence-grounding gate. Fail-open by design: verification is a
-        quality gate, not an availability gate. Verdicts are stamped onto findings so the
-        judge (and the ledger) can see GROUNDED/PARTIAL/UNGROUNDED per finding."""
-        roles = cast(list[str], await workflow.execute_activity(
-            registry_configured_roles,
-            args=[],
-            start_to_close_timeout=timedelta(seconds=15),
-            retry_policy=RetryPolicy(maximum_attempts=2),
-        ))
+        """Stamp verifier verdicts; availability fails open, eligibility fails closed later."""
+        roles = cast(
+            list[str],
+            await workflow.execute_activity(
+                registry_configured_roles,
+                args=[],
+                start_to_close_timeout=timedelta(seconds=15),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            ),
+        )
         if "verifier" not in roles:
             return specialist_payloads
         try:
@@ -252,13 +299,26 @@ class PortfolioOptimizationWorkflow:
         return merged
 
 
+def _context_evidence_ids(context: dict[str, object]) -> set[str]:
+    evidence = context.get("evidence", [])
+    if not isinstance(evidence, list):
+        return set()
+    return {
+        str(item["evidence_id"])
+        for item in evidence
+        if isinstance(item, dict) and item.get("evidence_id")
+    }
+
+
 def _telegram_summary(result: "PortfolioRunResult") -> str:
-    lines = [f"RUN COMPLETE {result.run_id}", f"Mode: {result.mode.value}"]
+    lines = [f"RUN COMPLETE {result.run_id}", f"Mode: {result.mode.value}", f"Status: {result.status}"]
     for item in result.interventions:
         score = f" | score {item.decision_score:.1f}" if item.decision_score is not None else ""
         lines.append(f"{item.rank}. {item.title} — confidence {item.confidence:.0%}{score}")
         lines.append(f"   Target: {item.target}")
         lines.append(f"   Signal: {item.expected_signal}")
+    if not result.interventions:
+        lines.append("No evidence-eligible intervention cleared the deterministic grounding gate.")
     lines.append(
         "Reply with a verdict to train future runs: "
         "ADOPTED / REJECTED / EXECUTED_VERIFIED / EXECUTED_NO_SIGNAL / PARTIAL"
