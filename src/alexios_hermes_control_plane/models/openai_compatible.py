@@ -61,24 +61,58 @@ class OpenAICompatibleAdapter[T: BaseModel](ModelAdapter[T]):
         }
         started = monotonic()
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions", headers=headers, json=payload
-            )
-            response.raise_for_status()
-            data = response.json()
+            data, request_id, usage = await self._post(client, headers, payload)
+            message = _assistant_message(data)
+            try:
+                parsed = _parse_structured_message(message, response_model)
+            except ValueError:
+                repair_payload = {
+                    **payload,
+                    "messages": [
+                        {"role": "system", "content": system_with_contract},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your previous response did not validate. Return ONLY one JSON "
+                                "object matching the schema exactly. Do not include prose, markdown, "
+                                "analysis, code fences, or extra keys. Original task follows:\n" + user
+                            ),
+                        },
+                    ],
+                }
+                data, repair_request_id, repair_usage = await self._post(
+                    client, headers, repair_payload
+                )
+                message = _assistant_message(data)
+                parsed = _parse_structured_message(message, response_model)
+                request_id = repair_request_id or request_id
+                usage = _sum_usage(usage, repair_usage)
 
-        message = _assistant_message(data)
-        parsed = _parse_structured_message(message, response_model)
-        usage = data.get("usage") if isinstance(data, dict) else None
-        usage = usage if isinstance(usage, dict) else {}
         return Invocation(
             output=parsed,
-            provider_request_id=response.headers.get("x-request-id"),
+            provider_request_id=request_id,
             latency_ms=round((monotonic() - started) * 1000),
             input_tokens=_int_or_none(usage.get("prompt_tokens")),
             output_tokens=_int_or_none(usage.get("completion_tokens")),
             total_tokens=_int_or_none(usage.get("total_tokens")),
         )
+
+    async def _post(
+        self,
+        client: httpx.AsyncClient,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], str | None, dict[str, Any]]:
+        response = await client.post(
+            f"{self.base_url}/chat/completions", headers=headers, json=payload
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("Provider returned a non-object response")
+        raw_usage = data.get("usage")
+        usage = raw_usage if isinstance(raw_usage, dict) else {}
+        return data, response.headers.get("x-request-id"), usage
 
 
 def _assistant_message(data: object) -> dict[str, Any]:
@@ -144,6 +178,18 @@ def _parse_structured_message[T: BaseModel](
             "Provider returned structured text, but none matched the required schema"
         ) from last_error
     raise ValueError("Provider returned no schema-valid structured output")
+
+
+def _sum_usage(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    totals: dict[str, Any] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        left = first.get(key)
+        right = second.get(key)
+        if isinstance(left, int) or isinstance(right, int):
+            totals[key] = (left if isinstance(left, int) else 0) + (
+                right if isinstance(right, int) else 0
+            )
+    return totals
 
 
 def _int_or_none(value: object) -> int | None:
