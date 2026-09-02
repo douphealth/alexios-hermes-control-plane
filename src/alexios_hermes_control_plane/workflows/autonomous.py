@@ -51,6 +51,35 @@ class AutonomousGrowthWorkflow:
 
         plans: list[dict[str, Any]] = []
         receipts: list[dict[str, Any]] = []
+
+        # READ_ONLY is a pure intelligence cycle. It must not require WordPress
+        # credentials, resolve targets, call the implementer, or touch live sites.
+        if requested_mode == RunMode.READ_ONLY:
+            result = {
+                "workflow_id": workflow_id,
+                "mode": requested_mode.value,
+                "analysis": analysis.model_dump(mode="json"),
+                "implementation_plans": plans,
+                "mutation_receipts": receipts,
+                "production_writes_attempted": False,
+            }
+            if notification_chat_id is not None:
+                message = (
+                    f"AUTONOMOUS GROWTH CYCLE {workflow_id}\n"
+                    f"Analysis: {analysis.status}\n"
+                    "Plans: 0\n"
+                    "Validated mutations: 0\n"
+                    "Rolled back: 0\n"
+                    "Mode: READ_ONLY"
+                )
+                await workflow.execute_activity(
+                    notify_telegram,
+                    args=[notification_chat_id, message],
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+            return result
+
         site_mutations: dict[str, int] = {}
         retry = RetryPolicy(maximum_attempts=2)
 
@@ -97,7 +126,7 @@ class AutonomousGrowthWorkflow:
                             "telemetry": implementer_payload.get("telemetry", {}),
                         }
                     )
-                    if requested_mode in {RunMode.READ_ONLY, RunMode.DRAFT}:
+                    if requested_mode == RunMode.DRAFT:
                         continue
 
                     for mutation in plan.mutations:

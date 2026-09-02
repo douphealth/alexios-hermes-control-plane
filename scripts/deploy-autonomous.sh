@@ -36,8 +36,8 @@ fi
 printf 'Validating compose configuration...\n'
 docker compose --env-file "$ENV_FILE" config --quiet
 
-printf 'Building and starting autonomous control-plane services...\n'
-docker compose --env-file "$ENV_FILE" up -d --build
+printf 'Building and starting core control-plane services...\n'
+docker compose --env-file "$ENV_FILE" up -d --build postgres temporal api worker
 
 printf 'Applying idempotent database migrations...\n'
 for migration in db/migrations/*.sql; do
@@ -58,17 +58,29 @@ done
 curl -fsS "$API_URL/healthz" >/tmp/ahcp-health.json || fail "API health check failed"
 curl -fsS "$API_URL/readyz" >/tmp/ahcp-ready.json || fail "API readiness check failed"
 
-printf 'Verifying worker and scheduler...\n'
-docker compose --env-file "$ENV_FILE" ps worker scheduler
+printf 'Verifying worker runtime...\n'
 WORKER_ID="$(docker compose --env-file "$ENV_FILE" ps -q worker)"
-SCHEDULER_ID="$(docker compose --env-file "$ENV_FILE" ps -q scheduler)"
 [[ -n "$WORKER_ID" ]] || fail "worker is not running"
-[[ -n "$SCHEDULER_ID" ]] || fail "scheduler is not running"
 
 if [[ -n "${GSC_SERVICE_ACCOUNT_FILE:-}" ]]; then
   docker compose --env-file "$ENV_FILE" exec -T worker \
     test -r "$GSC_SERVICE_ACCOUNT_FILE" || fail "worker cannot read GSC credential"
 fi
+
+docker compose --env-file "$ENV_FILE" exec -T worker \
+  sh -c 'touch /var/lib/ahcp/backups/.acceptance-test && rm /var/lib/ahcp/backups/.acceptance-test' \
+  || fail "worker cannot write rollback backup volume"
+
+printf 'Running structured-output provider acceptance...\n'
+docker compose --env-file "$ENV_FILE" exec -T worker \
+  ahcp-provider-smoke --mode "$MODE" || fail "provider acceptance failed"
+
+printf 'Starting autonomous scheduler after acceptance gates...\n'
+docker compose --env-file "$ENV_FILE" up -d scheduler
+SCHEDULER_ID="$(docker compose --env-file "$ENV_FILE" ps -q scheduler)"
+[[ -n "$SCHEDULER_ID" ]] || fail "scheduler is not running"
+
+docker compose --env-file "$ENV_FILE" ps worker scheduler
 
 printf '\nAUTONOMOUS CONTROL PLANE DEPLOYED\n'
 printf 'enabled=%s mode=%s production_writes=%s\n' \
