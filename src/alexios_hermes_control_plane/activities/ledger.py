@@ -24,6 +24,11 @@ async def ledger_record_agent_result(run_id: str, result: dict[str, object]) -> 
 
 
 @activity.defn
+async def ledger_record_evidence(run_id: str, items: list[dict[str, object]]) -> None:
+    await _get_ledger().record_evidence(run_id, items)
+
+
+@activity.defn
 async def ledger_complete_run(run_id: str, status: str, result: dict[str, object]) -> None:
     await _get_ledger().complete_run(run_id, status, result)
 
