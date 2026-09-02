@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import suppress
 from datetime import UTC, datetime
 
 from temporalio.client import Client
@@ -35,15 +36,13 @@ async def run_cycle() -> str | None:
         "max_interventions": settings.autonomous_max_interventions_per_cycle,
         "max_mutations_per_site": settings.autonomous_max_mutations_per_site,
     }
-    try:
+    with suppress(WorkflowAlreadyStartedError):
         await client.start_workflow(
             AutonomousGrowthWorkflow.run,
             payload,
             id=workflow_id,
             task_queue=settings.temporal_task_queue,
         )
-    except WorkflowAlreadyStartedError:
-        pass
     return workflow_id
 
 
