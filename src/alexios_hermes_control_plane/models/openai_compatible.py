@@ -147,8 +147,8 @@ def _validate_schema_value[T: BaseModel](value: object, response_model: type[T])
         try:
             normalized = response_model.model_validate(value, extra="ignore")
             return response_model.model_validate(normalized.model_dump(mode="python"))
-        except ValidationError:
-            raise strict_error
+        except ValidationError as normalization_error:
+            raise strict_error from normalization_error
 
 
 def _parse_structured_message[T: BaseModel](
