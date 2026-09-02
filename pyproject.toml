@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alexios-hermes-control-plane"
+version = "0.1.0"
+description = "Durable API-first orchestration control plane for Alexios Hermes Intelligence OS"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [{name = "Alexios Papaioannou"}]
+dependencies = [
+  "fastapi>=0.128,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "temporalio>=1.32,<2",
+  "openai>=3.7,<4",
+  "pydantic>=2.13,<3",
+  "pydantic-settings>=2.10,<3",
+  "httpx>=0.28,<1",
+  "asyncpg>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9,<10",
+  "pytest-asyncio>=1.2,<2",
+  "ruff>=0.12,<1",
+  "mypy>=1.17,<2",
+]
+
+[project.scripts]
+ahcp-api = "alexios_hermes_control_plane.api.main:run"
+ahcp-worker = "alexios_hermes_control_plane.worker:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alexios_hermes_control_plane"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["alexios_hermes_control_plane"]
