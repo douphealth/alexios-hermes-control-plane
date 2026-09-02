@@ -1,9 +1,9 @@
 import asyncio
 import logging
-from contextlib import suppress
 from datetime import UTC, datetime
 
 from temporalio.client import Client
+from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from alexios_hermes_control_plane.config import get_settings
@@ -24,15 +24,22 @@ def _measurement_id() -> str:
     return f"autonomous-measurement-{datetime.now(UTC).date().isoformat()}"
 
 
-async def run_cycle() -> tuple[str | None, str | None]:
+async def _ensure_cycle() -> tuple[str | None, str | None, bool, bool]:
+    """Ensure the current growth and measurement workflows exist exactly once on success.
+
+    Completed workflows are never started again within the same interval/day. Failed,
+    cancelled, or terminated workflows may be retried with the same business ID so the
+    scheduler can self-heal without creating duplicate successful work.
+    """
     settings = get_settings()
     if not settings.autonomous_growth_enabled:
-        return None, None
+        return None, None, False, False
     settings.assert_autonomous_write_safety()
     client = await Client.connect(
         settings.temporal_address,
         namespace=settings.temporal_namespace,
     )
+
     growth_id = _cycle_id(settings.autonomous_growth_interval_hours)
     growth_payload = {
         "objective": settings.autonomous_growth_objective,
@@ -41,22 +48,39 @@ async def run_cycle() -> tuple[str | None, str | None]:
         "max_interventions": settings.autonomous_max_interventions_per_cycle,
         "max_mutations_per_site": settings.autonomous_max_mutations_per_site,
     }
-    with suppress(WorkflowAlreadyStartedError):
+    growth_started = False
+    try:
         await client.start_workflow(
             AutonomousGrowthWorkflow.run,
             growth_payload,
             id=growth_id,
             task_queue=settings.temporal_task_queue,
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
         )
+        growth_started = True
+    except WorkflowAlreadyStartedError:
+        pass
 
     measurement_id = _measurement_id()
-    with suppress(WorkflowAlreadyStartedError):
+    measurement_started = False
+    try:
         await client.start_workflow(
             OutcomeMeasurementWorkflow.run,
             {"notification_chat_id": settings.autonomous_notification_chat_id},
             id=measurement_id,
             task_queue=settings.temporal_task_queue,
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
         )
+        measurement_started = True
+    except WorkflowAlreadyStartedError:
+        pass
+
+    return growth_id, measurement_id, growth_started, measurement_started
+
+
+async def run_cycle() -> tuple[str | None, str | None]:
+    """Public idempotent cycle entrypoint used by operations and tests."""
+    growth_id, measurement_id, _, _ = await _ensure_cycle()
     return growth_id, measurement_id
 
 
@@ -71,11 +95,11 @@ async def main() -> None:
     )
     while True:
         try:
-            growth_id, measurement_id = await run_cycle()
-            if growth_id:
-                logger.info("autonomous growth cycle ensured workflow_id=%s", growth_id)
-            if measurement_id:
-                logger.info("outcome measurement sweep ensured workflow_id=%s", measurement_id)
+            growth_id, measurement_id, growth_started, measurement_started = await _ensure_cycle()
+            if growth_id and growth_started:
+                logger.info("autonomous growth workflow started workflow_id=%s", growth_id)
+            if measurement_id and measurement_started:
+                logger.info("outcome measurement workflow started workflow_id=%s", measurement_id)
         except Exception:
             logger.exception("autonomous scheduler cycle failed")
         await asyncio.sleep(60)
