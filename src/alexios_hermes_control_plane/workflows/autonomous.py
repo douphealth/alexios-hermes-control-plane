@@ -20,10 +20,7 @@ with workflow.unsafe.imports_passed_through():
         PortfolioWorkflowInput,
         RunMode,
     )
-    from alexios_hermes_control_plane.schemas.execution import (
-        ImplementationPlan,
-        MutationReceipt,
-    )
+    from alexios_hermes_control_plane.schemas.execution import ImplementationPlan, MutationReceipt
     from alexios_hermes_control_plane.workflows.portfolio import PortfolioOptimizationWorkflow
 
 
@@ -39,10 +36,7 @@ class AutonomousGrowthWorkflow:
         workflow_id = workflow.info().workflow_id
 
         analysis_request = PortfolioRunRequest(objective=objective, mode=RunMode.READ_ONLY)
-        analysis_input = PortfolioWorkflowInput(
-            request=analysis_request,
-            notification_chat_id=None,
-        )
+        analysis_input = PortfolioWorkflowInput(request=analysis_request, notification_chat_id=None)
         analysis_payload = await workflow.execute_child_workflow(
             PortfolioOptimizationWorkflow.run,
             analysis_input.model_dump(mode="json"),
@@ -105,11 +99,16 @@ class AutonomousGrowthWorkflow:
                     for mutation in plan.mutations:
                         if site_mutations.get(site_id, 0) >= max_mutations_per_site:
                             break
+                        apply_args = [
+                            mutation.model_dump(mode="json"),
+                            snapshot,
+                            requested_mode.value,
+                        ]
                         applied_payload = cast(
                             dict[str, Any],
                             await workflow.execute_activity(
                                 wordpress_apply_mutation,
-                                args=[mutation.model_dump(mode="json"), snapshot, requested_mode.value],
+                                args=apply_args,
                                 start_to_close_timeout=timedelta(minutes=1),
                                 retry_policy=RetryPolicy(maximum_attempts=1),
                             ),
@@ -127,7 +126,8 @@ class AutonomousGrowthWorkflow:
                             )
                             validated = MutationReceipt.model_validate(validated_payload)
                             if validated.status != "VALIDATED":
-                                raise RuntimeError(validated.validation_error or "validation failed")
+                                error = validated.validation_error or "validation failed"
+                                raise RuntimeError(error)
                             receipts.append(validated.model_dump(mode="json"))
                             site_mutations[site_id] = site_mutations.get(site_id, 0) + 1
                         except Exception as exc:
