@@ -14,7 +14,16 @@ from alexios_hermes_control_plane.schemas.common import (
     VerifierOutput,
 )
 
-_MAX_ROWS_PER_EVIDENCE = 30
+_ROLE_ROW_LIMITS = {
+    "diagnostician": 10,
+    "strategist": 12,
+    "verifier": 12,
+}
+_ROLE_EVIDENCE_KINDS = {
+    "diagnostician": {"search_performance_summary", "top_pages"},
+    "strategist": {"search_performance_summary", "top_pages", "top_queries"},
+    "verifier": {"search_performance_summary", "top_pages", "top_queries"},
+}
 _CONTEXT_DUPLICATE_KEYS = {
     "evidence",
     "sites_display",
@@ -28,48 +37,61 @@ def _compact_json(value: Any) -> str:
     return json.dumps(value, default=str, separators=(",", ":"))
 
 
-def _compact_evidence_item(item: dict[str, Any]) -> dict[str, Any]:
+def _evidence_summary(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "evidence_id": item.get("evidence_id"),
+        "site_id": item.get("site_id"),
+        "kind": item.get("kind"),
+        "summary": item.get("summary"),
+        "period_start": item.get("period_start"),
+        "period_end": item.get("period_end"),
+        "payload_hash": item.get("payload_hash"),
+    }
+
+
+def _compact_evidence_item(item: dict[str, Any], row_limit: int) -> dict[str, Any]:
     compact = deepcopy(item)
     payload = compact.get("payload")
     if isinstance(payload, dict):
         rows = payload.get("rows")
         if isinstance(rows, list):
-            payload["rows"] = rows[:_MAX_ROWS_PER_EVIDENCE]
-            payload["rows_truncated"] = max(0, len(rows) - _MAX_ROWS_PER_EVIDENCE)
+            payload["rows"] = rows[:row_limit]
+            payload["rows_truncated"] = max(0, len(rows) - row_limit)
     return compact
 
 
 def _compact_context_for_role(role: str, context: dict[str, Any]) -> dict[str, Any]:
-    """Return a bounded model-facing context while preserving evidence IDs and provenance."""
+    """Return a small role-specific model context while preserving evidence provenance."""
     compact: dict[str, Any] = {
-        key: deepcopy(value)
-        for key, value in context.items()
-        if key not in _CONTEXT_DUPLICATE_KEYS
+        "sites": deepcopy(context.get("sites", [])),
+        "mode": context.get("mode", "READ_ONLY"),
+        "evidence_note": context.get("evidence_note", ""),
+        "operating_rules": deepcopy(context.get("operating_rules", [])),
     }
-    raw_evidence = context.get("evidence", [])
-    evidence: list[dict[str, Any]] = []
-    if isinstance(raw_evidence, list):
-        evidence = [
-            _compact_evidence_item(item)
-            for item in raw_evidence
-            if isinstance(item, dict)
-        ]
 
-    if role == "chief_of_staff":
-        # Chief of staff reasons primarily over portfolio memory/state; summaries are enough.
-        compact["evidence"] = [
-            {
-                "evidence_id": item.get("evidence_id"),
-                "site_id": item.get("site_id"),
-                "kind": item.get("kind"),
-                "summary": item.get("summary"),
-                "period_start": item.get("period_start"),
-                "period_end": item.get("period_end"),
-            }
-            for item in evidence
-        ]
+    raw_evidence = context.get("evidence", [])
+    evidence = [item for item in raw_evidence if isinstance(item, dict)] if isinstance(raw_evidence, list) else []
+
+    if role in {"chief_of_staff", "judge"}:
+        compact["evidence"] = [_evidence_summary(item) for item in evidence]
     else:
-        compact["evidence"] = evidence
+        allowed_kinds = _ROLE_EVIDENCE_KINDS.get(role)
+        if allowed_kinds is not None:
+            evidence = [item for item in evidence if str(item.get("kind")) in allowed_kinds]
+        row_limit = _ROLE_ROW_LIMITS.get(role, 8)
+        compact["evidence"] = [_compact_evidence_item(item, row_limit) for item in evidence]
+
+    if role == "strategist":
+        recent_runs = context.get("recent_runs", [])
+        compact["recent_runs"] = deepcopy(recent_runs[:3]) if isinstance(recent_runs, list) else []
+    elif role == "chief_of_staff":
+        recent_runs = context.get("recent_runs", [])
+        feedback_memory = context.get("feedback_memory", [])
+        compact["recent_runs"] = deepcopy(recent_runs[:5]) if isinstance(recent_runs, list) else []
+        compact["feedback_memory"] = (
+            deepcopy(feedback_memory[:10]) if isinstance(feedback_memory, list) else []
+        )
+
     return compact
 
 
