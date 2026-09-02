@@ -90,6 +90,14 @@ def _compact_context_for_role(role: str, context: dict[str, Any]) -> dict[str, A
     return compact
 
 
+def _reset_specialist_verification(output: SpecialistOutput) -> SpecialistOutput:
+    """Ensure specialists cannot self-certify findings before independent verification."""
+    sanitized = output.model_copy(deep=True)
+    for finding in sanitized.findings:
+        finding.verification = "UNVERIFIED"
+    return sanitized
+
+
 def _eligible_specialist_results(
     specialist_results: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -148,7 +156,7 @@ async def run_specialist(
         response_model=SpecialistOutput,
         prompt_cache_key=f"ahcp:{role}:{PROMPT_VERSION}",
     )
-    output = invocation.output
+    output = _reset_specialist_verification(invocation.output)
     result = AgentResult(
         **output.model_dump(),
         agent=role,
