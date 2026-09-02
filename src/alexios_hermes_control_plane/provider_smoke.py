@@ -7,7 +7,11 @@ from pydantic import BaseModel
 
 from alexios_hermes_control_plane.config import get_settings
 from alexios_hermes_control_plane.models.registry import ModelRegistry
-from alexios_hermes_control_plane.schemas.common import JudgeOutput, SpecialistOutput, VerifierOutput
+from alexios_hermes_control_plane.schemas.common import (
+    JudgeOutput,
+    SpecialistOutput,
+    VerifierOutput,
+)
 from alexios_hermes_control_plane.schemas.execution import ImplementationPlan
 
 _ROLE_MODELS: dict[str, type[BaseModel]] = {
