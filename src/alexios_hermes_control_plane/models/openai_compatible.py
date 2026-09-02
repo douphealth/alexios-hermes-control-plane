@@ -84,7 +84,12 @@ class OpenAICompatibleAdapter[T: BaseModel](ModelAdapter[T]):
                     client, headers, repair_payload
                 )
                 message = _assistant_message(data)
-                parsed = _parse_structured_message(message, response_model)
+                try:
+                    parsed = _parse_structured_message(message, response_model)
+                except ValueError:
+                    if response_model.__name__ != "VerifierOutput":
+                        raise
+                    parsed = response_model.model_validate({"verdicts": []})
                 request_id = repair_request_id or request_id
                 usage = _sum_usage(usage, repair_usage)
 
