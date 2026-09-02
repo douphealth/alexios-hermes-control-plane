@@ -96,10 +96,18 @@ async def main() -> None:
     while True:
         try:
             growth_id, measurement_id, growth_started, measurement_started = await _ensure_cycle()
-            if growth_id and growth_started:
-                logger.info("autonomous growth workflow started workflow_id=%s", growth_id)
-            if measurement_id and measurement_started:
-                logger.info("outcome measurement workflow started workflow_id=%s", measurement_id)
+            if growth_id:
+                logger.info(
+                    "autonomous growth cycle ensured workflow_id=%s started=%s",
+                    growth_id,
+                    growth_started,
+                )
+            if measurement_id:
+                logger.info(
+                    "outcome measurement cycle ensured workflow_id=%s started=%s",
+                    measurement_id,
+                    measurement_started,
+                )
         except Exception:
             logger.exception("autonomous scheduler cycle failed")
         await asyncio.sleep(60)
