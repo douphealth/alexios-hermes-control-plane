@@ -15,6 +15,17 @@ from alexios_hermes_control_plane.schemas.common import (
 )
 
 _MAX_ROWS_PER_EVIDENCE = 30
+_CONTEXT_DUPLICATE_KEYS = {
+    "evidence",
+    "sites_display",
+    "operating_rules_display",
+    "recent_runs_display",
+    "feedback_memory_display",
+}
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, default=str, separators=(",", ":"))
 
 
 def _compact_evidence_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -33,14 +44,16 @@ def _compact_context_for_role(role: str, context: dict[str, Any]) -> dict[str, A
     compact: dict[str, Any] = {
         key: deepcopy(value)
         for key, value in context.items()
-        if key not in {"evidence", "sites_display", "operating_rules_display", "recent_runs_display", "feedback_memory_display"}
+        if key not in _CONTEXT_DUPLICATE_KEYS
     }
     raw_evidence = context.get("evidence", [])
-    evidence = [
-        _compact_evidence_item(item)
-        for item in raw_evidence
-        if isinstance(item, dict)
-    ] if isinstance(raw_evidence, list) else []
+    evidence: list[dict[str, Any]] = []
+    if isinstance(raw_evidence, list):
+        evidence = [
+            _compact_evidence_item(item)
+            for item in raw_evidence
+            if isinstance(item, dict)
+        ]
 
     if role == "chief_of_staff":
         # Chief of staff reasons primarily over portfolio memory/state; summaries are enough.
@@ -113,7 +126,7 @@ async def run_specialist(
         system=ROLE_PROMPTS[role],
         user=(
             f"Objective: {objective}\n"
-            f"Context JSON: {json.dumps(model_context, default=str, separators=(',', ':'))}"
+            f"Context JSON: {_compact_json(model_context)}"
         ),
         response_model=SpecialistOutput,
         prompt_cache_key=f"ahcp:{role}:{PROMPT_VERSION}",
@@ -146,8 +159,8 @@ async def run_verifier(
         system=ROLE_PROMPTS["verifier"],
         user=(
             f"Objective: {objective}\n"
-            f"Context JSON: {json.dumps(model_context, default=str, separators=(',', ':'))}\n"
-            f"Specialist results: {json.dumps(specialist_results, default=str, separators=(',', ':'))}"
+            f"Context JSON: {_compact_json(model_context)}\n"
+            f"Specialist results: {_compact_json(specialist_results)}"
         ),
         response_model=VerifierOutput,
         prompt_cache_key=f"ahcp:verifier:{PROMPT_VERSION}",
@@ -207,8 +220,8 @@ async def run_judge(
         system=ROLE_PROMPTS["judge"],
         user=(
             f"Objective: {objective}\n"
-            f"Context JSON: {json.dumps(model_context, default=str, separators=(',', ':'))}\n"
-            f"Eligible specialist results: {json.dumps(eligible_results, default=str, separators=(',', ':'))}"
+            f"Context JSON: {_compact_json(model_context)}\n"
+            f"Eligible specialist results: {_compact_json(eligible_results)}"
         ),
         response_model=JudgeOutput,
         prompt_cache_key=f"ahcp:judge:{PROMPT_VERSION}",
