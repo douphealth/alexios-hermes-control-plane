@@ -41,13 +41,14 @@ def _credentials_token(service_account_file: str) -> str:
     path = Path(service_account_file).expanduser()
     if not path.is_file():
         raise FileNotFoundError(f"GSC service-account file not found: {path}")
-    credentials = service_account.Credentials.from_service_account_file(
+    credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
         str(path), scopes=[_GSC_SCOPE]
     )
     credentials.refresh(Request())
-    if not credentials.token:
+    token = credentials.token
+    if not token:
         raise RuntimeError("GSC service-account token refresh returned no token")
-    return credentials.token
+    return str(token)
 
 
 async def _query_search_analytics(
