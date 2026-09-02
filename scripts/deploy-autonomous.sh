@@ -92,7 +92,7 @@ if [[ "$ENABLED" == "true" ]]; then
     SCHEDULER_ID="$(docker compose --env-file "$ENV_FILE" ps -q scheduler)"
     [[ -n "$SCHEDULER_ID" ]] || fail "scheduler exited before workflow creation"
     if docker compose --env-file "$ENV_FILE" logs --no-color scheduler 2>&1 \
-      | grep -q 'autonomous growth cycle ensured workflow_id=autonomous-growth-'; then
+      | grep -q 'autonomous growth workflow started workflow_id=autonomous-growth-'; then
       verified=true
       break
     fi
