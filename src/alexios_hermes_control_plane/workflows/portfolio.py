@@ -43,7 +43,7 @@ with workflow.unsafe.imports_passed_through():
 @workflow.defn
 class PortfolioOptimizationWorkflow:
     @workflow.run
-    async def run(self, input_payload: dict[str, object]) -> dict[str, object]:
+    async def run(self, input_payload: dict[str, Any]) -> dict[str, Any]:
         workflow_input = PortfolioWorkflowInput.model_validate(input_payload)
         request = workflow_input.request
         run_id = workflow.info().workflow_id
@@ -84,8 +84,8 @@ class PortfolioOptimizationWorkflow:
                 retry_policy=retry,
             )
             judge_output = JudgeOutput.model_validate(judge_payload["judge_output"])
-            judge_telemetry = cast(dict[str, object], judge_payload["telemetry"])
-            judge_record: dict[str, object] = {
+            judge_telemetry = cast(dict[str, Any], judge_payload["telemetry"])
+            judge_record: dict[str, Any] = {
                 **judge_telemetry,
                 "status": "SUCCESS",
                 "summary": f"Selected {len(judge_output.interventions)} interventions",
@@ -144,7 +144,7 @@ class PortfolioOptimizationWorkflow:
                 )
             raise
 
-    async def _build_context(self, request: PortfolioRunRequest) -> dict[str, object]:
+    async def _build_context(self, request: PortfolioRunRequest) -> dict[str, Any]:
         config = await workflow.execute_activity(
             load_context_config,
             args=[request.sites],
@@ -172,7 +172,7 @@ class PortfolioOptimizationWorkflow:
         config_sites = cast(list[dict[str, str]], config["sites"])
         config_rules = cast(list[str], config["operating_rules"])
         evidence_result = cast(
-            dict[str, object],
+            dict[str, Any],
             await workflow.execute_activity(
                 collect_gsc_evidence,
                 args=[config_sites],
@@ -180,7 +180,7 @@ class PortfolioOptimizationWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=2),
             ),
         )
-        evidence = cast(list[dict[str, object]], evidence_result.get("evidence", []))
+        evidence = cast(list[dict[str, Any]], evidence_result.get("evidence", []))
         note = str(evidence_result.get("note", "GSC evidence collection returned no note."))
         errors = cast(list[str], evidence_result.get("errors", []))
         if errors:
@@ -199,17 +199,17 @@ class PortfolioOptimizationWorkflow:
             "feedback_memory_display": format_feedback_memory(feedback_memory),
         }
 
-    async def _load_history(self) -> dict[str, object]:
+    async def _load_history(self) -> dict[str, Any]:
         return {}
 
     async def _run_specialists(
         self,
         objective: str,
-        context: dict[str, object],
-        history: dict[str, object],
+        context: dict[str, Any],
+        history: dict[str, Any],
         retry: RetryPolicy,
         agent_timeout: timedelta,
-    ) -> list[dict[str, object]]:
+    ) -> list[dict[str, Any]]:
         tasks = [
             workflow.execute_activity(
                 run_specialist,
@@ -224,11 +224,11 @@ class PortfolioOptimizationWorkflow:
     async def _run_verifier_gate(
         self,
         objective: str,
-        specialist_payloads: list[dict[str, object]],
-        context: dict[str, object],
+        specialist_payloads: list[dict[str, Any]],
+        context: dict[str, Any],
         retry: RetryPolicy,
         agent_timeout: timedelta,
-    ) -> list[dict[str, object]]:
+    ) -> list[dict[str, Any]]:
         """Stamp verifier verdicts; unavailable verification leaves findings UNVERIFIED.
 
         The workflow remains available when the verifier is absent, while run_judge enforces
@@ -255,13 +255,13 @@ class PortfolioOptimizationWorkflow:
         except Exception:
             return specialist_payloads
 
-        verifier_output = cast(dict[str, object], verifier_payload["verifier_output"])
-        raw_verdicts = cast(list[object], verifier_output.get("verdicts", []))
+        verifier_output = cast(dict[str, Any], verifier_payload["verifier_output"])
+        raw_verdicts = cast(list[Any], verifier_output.get("verdicts", []))
         by_finding: dict[str, str] = {}
         for verdict in raw_verdicts:
             if isinstance(verdict, dict):
                 by_finding[str(verdict.get("finding_id"))] = str(verdict.get("verdict"))
-        merged: list[dict[str, object]] = []
+        merged: list[dict[str, Any]] = []
         for payload in specialist_payloads:
             findings = payload.get("findings", [])
             if isinstance(findings, list):
