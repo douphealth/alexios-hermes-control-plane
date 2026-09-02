@@ -26,7 +26,10 @@ def test_default_portfolio_covers_nine_real_sites() -> None:
         "openclaw-skillshub.com",
     }
     assert all(str(s.get("site_id", "")) for s in DEFAULT_PORTFOLIO_SITES)
-    assert all(str(s.get("gsc_property", "")).startswith("sc-domain:") for s in DEFAULT_PORTFOLIO_SITES)
+    assert all(
+        str(s.get("gsc_property", "")).startswith("sc-domain:")
+        for s in DEFAULT_PORTFOLIO_SITES
+    )
 
 
 def test_json_override_wins() -> None:
