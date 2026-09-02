@@ -192,19 +192,25 @@ class GscClient:
         return [str(item.get("siteUrl")) for item in entries if isinstance(item, dict)]
 
     async def search_analytics(
-        self, property_url: str, start_date: date, end_date: date
+        self,
+        property_url: str,
+        start_date: date,
+        end_date: date,
+        dimensions: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         encoded = quote(property_url, safe="")
+        body: dict[str, Any] = {
+            "startDate": start_date.isoformat(),
+            "endDate": end_date.isoformat(),
+            "rowLimit": self._row_limit if dimensions else 1,
+            "dataState": "final",
+        }
+        if dimensions:
+            body["dimensions"] = dimensions
         data = await self._request(
             "POST",
             f"{_API}/sites/{encoded}/searchAnalytics/query",
-            body={
-                "startDate": start_date.isoformat(),
-                "endDate": end_date.isoformat(),
-                "dimensions": ["page", "query"],
-                "rowLimit": self._row_limit,
-                "dataState": "final",
-            },
+            body=body,
         )
         rows = data.get("rows", [])
         return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
@@ -240,15 +246,21 @@ async def _collect_site(
     previous_end = current_start - timedelta(days=1)
     previous_start = previous_end - timedelta(days=settings.gsc_days - 1)
     try:
-        current_rows, previous_rows = await asyncio.gather(
+        current_summary_rows, previous_summary_rows, current_detail_rows = await asyncio.gather(
             client.search_analytics(property_url, current_start, current_end),
             client.search_analytics(property_url, previous_start, previous_end),
+            client.search_analytics(
+                property_url,
+                current_start,
+                current_end,
+                dimensions=["page", "query"],
+            ),
         )
     except (httpx.HTTPError, RuntimeError, ValueError) as exc:
         return [], f"{site['domain']}: {type(exc).__name__}: {str(exc)[:300]}"
 
-    current = _metrics(current_rows)
-    previous = _metrics(previous_rows)
+    current = _metrics(current_summary_rows)
+    previous = _metrics(previous_summary_rows)
     comparison = {
         "current": current,
         "previous": previous,
@@ -258,8 +270,8 @@ async def _collect_site(
             "ctr": round(current["ctr"] - previous["ctr"], 6),
             "position": round(current["position"] - previous["position"], 3),
         },
-        "row_count_current": len(current_rows),
-        "row_count_previous": len(previous_rows),
+        "detail_row_count_current": len(current_detail_rows),
+        "detail_row_limit": settings.gsc_row_limit,
     }
     summary = _evidence(
         site=site,
@@ -274,7 +286,14 @@ async def _collect_site(
         ),
         payload=comparison,
     )
-    opportunity_payload = _opportunities(current_rows)
+    opportunity_payload = _opportunities(current_detail_rows)
+    opportunity_payload["detail_meta"] = [
+        {
+            "rows_returned": len(current_detail_rows),
+            "row_limit": settings.gsc_row_limit,
+            "may_be_truncated": len(current_detail_rows) >= settings.gsc_row_limit,
+        }
+    ]
     low_ctr_count = len(opportunity_payload["high_impression_low_ctr_queries"])
     opportunities = _evidence(
         site=site,
