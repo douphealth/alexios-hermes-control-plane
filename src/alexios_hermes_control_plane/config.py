@@ -99,7 +99,8 @@ class Settings(BaseSettings):
             raise RuntimeError("TELEGRAM_ALLOWED_USER_IDS must be explicit in production")
 
     def assert_autonomous_write_safety(self) -> None:
-        if self.autonomous_growth_mode == "PRODUCTION_APPROVED" and not self.allow_production_writes:
+        production_requested = self.autonomous_growth_mode == "PRODUCTION_APPROVED"
+        if production_requested and not self.allow_production_writes:
             raise RuntimeError(
                 "Autonomous production mode requires ALLOW_PRODUCTION_WRITES=true"
             )
