@@ -13,10 +13,18 @@ T = TypeVar("T", bound=BaseModel)
 class OpenAICompatibleAdapter[T: BaseModel](ModelAdapter[T]):
     """Fallback Chat Completions adapter for OpenAI-compatible providers."""
 
-    def __init__(self, *, base_url: str, api_key: str, timeout: float = 180.0) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        timeout: float = 180.0,
+        max_tokens: int = 2500,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        self.max_tokens = max_tokens
 
     async def invoke_structured(
         self,
@@ -41,8 +49,12 @@ class OpenAICompatibleAdapter[T: BaseModel](ModelAdapter[T]):
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0,
+            "max_tokens": self.max_tokens,
         }
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
         started = monotonic()
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(
@@ -51,8 +63,8 @@ class OpenAICompatibleAdapter[T: BaseModel](ModelAdapter[T]):
             response.raise_for_status()
             data = response.json()
         content = data["choices"][0]["message"]["content"]
-        if not isinstance(content, str):
-            raise ValueError("Provider returned non-string message content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Provider returned empty or non-string message content")
         try:
             parsed = response_model.model_validate_json(content)
         except ValidationError as exc:

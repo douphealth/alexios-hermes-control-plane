@@ -24,7 +24,7 @@ with workflow.unsafe.imports_passed_through():
         ledger_record_agent_result,
     )
     from alexios_hermes_control_plane.activities.notifications import notify_telegram
-    from alexios_hermes_control_plane.prompts import SPECIALIST_ROLES
+    from alexios_hermes_control_plane.prompts import PROMPT_VERSION, SPECIALIST_ROLES
     from alexios_hermes_control_plane.prompts.portfolio_context import (
         format_feedback_memory,
         format_operating_rules,
@@ -38,6 +38,25 @@ with workflow.unsafe.imports_passed_through():
         PortfolioRunResult,
         PortfolioWorkflowInput,
     )
+
+
+def _failed_specialist_payload(role: str, exc: BaseException) -> dict[str, Any]:
+    return {
+        "status": "FAILED",
+        "summary": f"{role} provider invocation failed; findings excluded from decisions.",
+        "findings": [],
+        "evidence_ids": [],
+        "assumptions": [],
+        "error": f"{type(exc).__name__}: {str(exc)[:1200]}",
+        "agent": role,
+        "model": "provider-error",
+        "prompt_version": PROMPT_VERSION,
+        "provider_request_id": None,
+        "latency_ms": None,
+        "input_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+    }
 
 
 @workflow.defn
@@ -219,7 +238,14 @@ class PortfolioOptimizationWorkflow:
             )
             for role in SPECIALIST_ROLES
         ]
-        return list(await asyncio.gather(*tasks))
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+        results: list[dict[str, Any]] = []
+        for role, result in zip(SPECIALIST_ROLES, raw_results, strict=True):
+            if isinstance(result, BaseException):
+                results.append(_failed_specialist_payload(role, result))
+            else:
+                results.append(cast(dict[str, Any], result))
+        return results
 
     async def _run_verifier_gate(
         self,
