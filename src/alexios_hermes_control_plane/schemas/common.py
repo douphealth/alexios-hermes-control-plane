@@ -25,6 +25,13 @@ class Evidence(StrictModel):
     evidence_id: str
     source: str
     summary: str
+    site_id: str | None = None
+    kind: str | None = None
+    observed_at: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    source_property: str | None = None
+    payload_hash: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -100,15 +107,15 @@ class PortfolioRunContext(StrictModel):
 
     sites: list[dict[str, str]] = Field(default_factory=list, max_length=50)
     mode: str = "READ_ONLY"
-    evidence: list[Evidence] = Field(default_factory=list, max_length=100)
-    evidence_note: str = "Stage-1 control-plane run; live evidence connectors are not enabled yet."
+    evidence: list[Evidence] = Field(default_factory=list, max_length=300)
+    evidence_note: str = "Live evidence connectors are not enabled yet."
     operating_rules: list[str] = Field(default_factory=list, max_length=30)
     recent_runs: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
     feedback_memory: list[InterventionFeedbackItem] = Field(default_factory=list, max_length=50)
 
 
 class JudgeOutput(StrictModel):
-    interventions: list[Intervention] = Field(min_length=1, max_length=3)
+    interventions: list[Intervention] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
     def validate_unique_ranks(self) -> "JudgeOutput":
