@@ -14,6 +14,64 @@ from alexios_hermes_control_plane.schemas.common import (
     VerifierOutput,
 )
 
+_MAX_ROWS_PER_EVIDENCE = 30
+_CONTEXT_DUPLICATE_KEYS = {
+    "evidence",
+    "sites_display",
+    "operating_rules_display",
+    "recent_runs_display",
+    "feedback_memory_display",
+}
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, default=str, separators=(",", ":"))
+
+
+def _compact_evidence_item(item: dict[str, Any]) -> dict[str, Any]:
+    compact = deepcopy(item)
+    payload = compact.get("payload")
+    if isinstance(payload, dict):
+        rows = payload.get("rows")
+        if isinstance(rows, list):
+            payload["rows"] = rows[:_MAX_ROWS_PER_EVIDENCE]
+            payload["rows_truncated"] = max(0, len(rows) - _MAX_ROWS_PER_EVIDENCE)
+    return compact
+
+
+def _compact_context_for_role(role: str, context: dict[str, Any]) -> dict[str, Any]:
+    """Return a bounded model-facing context while preserving evidence IDs and provenance."""
+    compact: dict[str, Any] = {
+        key: deepcopy(value)
+        for key, value in context.items()
+        if key not in _CONTEXT_DUPLICATE_KEYS
+    }
+    raw_evidence = context.get("evidence", [])
+    evidence: list[dict[str, Any]] = []
+    if isinstance(raw_evidence, list):
+        evidence = [
+            _compact_evidence_item(item)
+            for item in raw_evidence
+            if isinstance(item, dict)
+        ]
+
+    if role == "chief_of_staff":
+        # Chief of staff reasons primarily over portfolio memory/state; summaries are enough.
+        compact["evidence"] = [
+            {
+                "evidence_id": item.get("evidence_id"),
+                "site_id": item.get("site_id"),
+                "kind": item.get("kind"),
+                "summary": item.get("summary"),
+                "period_start": item.get("period_start"),
+                "period_end": item.get("period_end"),
+            }
+            for item in evidence
+        ]
+    else:
+        compact["evidence"] = evidence
+    return compact
+
 
 def _eligible_specialist_results(
     specialist_results: list[dict[str, Any]],
@@ -62,12 +120,13 @@ async def run_specialist(
         raise ValueError(f"Unsupported specialist role: {role}")
     registry = ModelRegistry(get_settings())
     target = registry.get(role)
+    model_context = _compact_context_for_role(role, context)
     invocation = await target.adapter.invoke_structured(
         model=target.model,
         system=ROLE_PROMPTS[role],
         user=(
             f"Objective: {objective}\n"
-            f"Context JSON: {json.dumps(context, default=str)}"
+            f"Context JSON: {_compact_json(model_context)}"
         ),
         response_model=SpecialistOutput,
         prompt_cache_key=f"ahcp:{role}:{PROMPT_VERSION}",
@@ -94,13 +153,14 @@ async def run_verifier(
     """Independent grounding check; returns verdicts without mutating findings."""
     registry = ModelRegistry(get_settings())
     target = registry.get("verifier")
+    model_context = _compact_context_for_role("verifier", context)
     invocation = await target.adapter.invoke_structured(
         model=target.model,
         system=ROLE_PROMPTS["verifier"],
         user=(
             f"Objective: {objective}\n"
-            f"Context JSON: {json.dumps(context, default=str)}\n"
-            f"Specialist results: {json.dumps(specialist_results, default=str)}"
+            f"Context JSON: {_compact_json(model_context)}\n"
+            f"Specialist results: {_compact_json(specialist_results)}"
         ),
         response_model=VerifierOutput,
         prompt_cache_key=f"ahcp:verifier:{PROMPT_VERSION}",
@@ -154,13 +214,14 @@ async def run_judge(
 
     registry = ModelRegistry(get_settings())
     target = registry.get("judge")
+    model_context = _compact_context_for_role("judge", context)
     invocation = await target.adapter.invoke_structured(
         model=target.model,
         system=ROLE_PROMPTS["judge"],
         user=(
             f"Objective: {objective}\n"
-            f"Context JSON: {json.dumps(context, default=str)}\n"
-            f"Eligible specialist results: {json.dumps(eligible_results, default=str)}"
+            f"Context JSON: {_compact_json(model_context)}\n"
+            f"Eligible specialist results: {_compact_json(eligible_results)}"
         ),
         response_model=JudgeOutput,
         prompt_cache_key=f"ahcp:judge:{PROMPT_VERSION}",
