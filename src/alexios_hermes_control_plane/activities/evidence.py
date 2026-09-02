@@ -10,7 +10,7 @@ import json
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, cast
 from urllib.parse import quote
 
 import httpx
@@ -140,6 +140,14 @@ def _resolve_credential_path(configured: str) -> Path:
     return Path(expanded)
 
 
+def _load_service_account(path: Path) -> service_account.Credentials:
+    factory = cast(
+        Callable[..., service_account.Credentials],
+        service_account.Credentials.from_service_account_file,
+    )
+    return factory(str(path), scopes=[_SCOPE])
+
+
 class GscClient:
     def __init__(self, settings: Settings) -> None:
         if not settings.gsc_service_account_file:
@@ -147,9 +155,7 @@ class GscClient:
         path = _resolve_credential_path(settings.gsc_service_account_file)
         if not path.is_file():
             raise RuntimeError(f"GSC service-account file not found: {path}")
-        self._credentials = service_account.Credentials.from_service_account_file(
-            str(path), scopes=[_SCOPE]
-        )
+        self._credentials = _load_service_account(path)
         self._timeout = settings.gsc_request_timeout_seconds
         self._row_limit = settings.gsc_row_limit
 
@@ -157,7 +163,7 @@ class GscClient:
         if not self._credentials.valid:
             await asyncio.to_thread(self._credentials.refresh, Request())
         token = self._credentials.token
-        if not token:
+        if not isinstance(token, str) or not token:
             raise RuntimeError("GSC credential refresh returned no access token")
         return token
 
