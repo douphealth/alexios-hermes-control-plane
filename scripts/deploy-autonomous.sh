@@ -86,13 +86,13 @@ SCHEDULER_ID="$(docker compose --env-file "$ENV_FILE" ps -q scheduler)"
 [[ -n "$SCHEDULER_ID" ]] || fail "scheduler is not running"
 
 if [[ "$ENABLED" == "true" ]]; then
-  printf 'Verifying first autonomous workflow creation...\n'
+  printf 'Verifying autonomous workflow satisfaction...\n'
   verified=false
   for _ in $(seq 1 30); do
     SCHEDULER_ID="$(docker compose --env-file "$ENV_FILE" ps -q scheduler)"
-    [[ -n "$SCHEDULER_ID" ]] || fail "scheduler exited before workflow creation"
+    [[ -n "$SCHEDULER_ID" ]] || fail "scheduler exited before workflow verification"
     if docker compose --env-file "$ENV_FILE" logs --no-color scheduler 2>&1 \
-      | grep -q 'autonomous growth workflow started workflow_id=autonomous-growth-'; then
+      | grep -q 'autonomous growth cycle ensured workflow_id=autonomous-growth-'; then
       verified=true
       break
     fi
@@ -100,7 +100,7 @@ if [[ "$ENABLED" == "true" ]]; then
   done
   [[ "$verified" == "true" ]] || {
     docker compose --env-file "$ENV_FILE" logs --tail=120 scheduler >&2 || true
-    fail "scheduler did not confirm autonomous workflow creation within 60 seconds"
+    fail "scheduler did not confirm autonomous workflow satisfaction within 60 seconds"
   }
 fi
 
