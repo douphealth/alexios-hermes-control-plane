@@ -4,6 +4,7 @@ External reads happen in Temporal activities so workflow replay stays determinis
 """
 
 import asyncio
+import glob
 import hashlib
 import json
 from collections import defaultdict
@@ -126,11 +127,24 @@ def _opportunities(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
     }
 
 
+def _resolve_credential_path(configured: str) -> Path:
+    expanded = str(Path(configured).expanduser())
+    if any(token in expanded for token in ("*", "?", "[")):
+        matches = sorted(glob.glob(expanded))
+        if len(matches) != 1:
+            raise RuntimeError(
+                "GSC_SERVICE_ACCOUNT_FILE glob must resolve to exactly one file; "
+                f"matched {len(matches)}"
+            )
+        return Path(matches[0])
+    return Path(expanded)
+
+
 class GscClient:
     def __init__(self, settings: Settings) -> None:
         if not settings.gsc_service_account_file:
             raise RuntimeError("GSC_SERVICE_ACCOUNT_FILE is not configured")
-        path = Path(settings.gsc_service_account_file).expanduser()
+        path = _resolve_credential_path(settings.gsc_service_account_file)
         if not path.is_file():
             raise RuntimeError(f"GSC service-account file not found: {path}")
         self._credentials = service_account.Credentials.from_service_account_file(
@@ -255,6 +269,7 @@ async def _collect_site(
         payload=comparison,
     )
     opportunity_payload = _opportunities(current_rows)
+    low_ctr_count = len(opportunity_payload["high_impression_low_ctr_queries"])
     opportunities = _evidence(
         site=site,
         kind="search_opportunities",
@@ -264,7 +279,7 @@ async def _collect_site(
         summary=(
             f"{site['domain']} GSC opportunity set: "
             f"{len(opportunity_payload['striking_distance_queries'])} striking-distance queries, "
-            f"{len(opportunity_payload['high_impression_low_ctr_queries'])} high-impression low-CTR queries."
+            f"{low_ctr_count} high-impression low-CTR queries."
         ),
         payload=opportunity_payload,
     )
@@ -287,7 +302,10 @@ async def collect_gsc_evidence(sites: list[dict[str, str]]) -> dict[str, object]
     except (httpx.HTTPError, RuntimeError, ValueError) as exc:
         return {
             "evidence": [],
-            "note": "GSC evidence unavailable; agents must treat GSC-dependent claims as NEEDS_DATA.",
+            "note": (
+                "GSC evidence unavailable; agents must treat GSC-dependent claims "
+                "as NEEDS_DATA."
+            ),
             "errors": [f"{type(exc).__name__}: {str(exc)[:500]}"],
         }
 
