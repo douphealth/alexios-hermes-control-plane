@@ -24,15 +24,44 @@ class Ledger:
         value = await self._pool.fetchval("SELECT 1")
         return bool(value == 1)
 
-    async def create_run(self, run_id: str, objective: str, mode: str) -> None:
+    async def create_run(
+        self,
+        run_id: str,
+        objective: str,
+        mode: str,
+        run_kind: str = "PORTFOLIO",
+    ) -> None:
         await self.connect()
         assert self._pool is not None
         await self._pool.execute(
-            "INSERT INTO runs(run_id, objective, mode, status) VALUES($1,$2,$3,'RUNNING') "
-            "ON CONFLICT (run_id) DO NOTHING",
+            """
+            INSERT INTO runs(run_id, objective, mode, status, run_kind, phase, updated_at)
+            VALUES($1,$2,$3,'RUNNING',$4,'STARTING',now())
+            ON CONFLICT (run_id) DO NOTHING
+            """,
             run_id,
             objective,
             mode,
+            run_kind,
+        )
+
+    async def update_run_phase(
+        self,
+        run_id: str,
+        phase: str,
+        detail: str | None = None,
+    ) -> None:
+        await self.connect()
+        assert self._pool is not None
+        await self._pool.execute(
+            """
+            UPDATE runs
+            SET phase=$2, phase_detail=$3, updated_at=now()
+            WHERE run_id=$1
+            """,
+            run_id,
+            phase,
+            detail,
         )
 
     async def record_agent_result(self, run_id: str, result: dict[str, Any]) -> None:
@@ -60,31 +89,101 @@ class Ledger:
     async def complete_run(self, run_id: str, status: str, result: dict[str, Any]) -> None:
         await self.connect()
         assert self._pool is not None
+        terminal_phase = "FAILED" if status == "FAILED" else "COMPLETE"
         await self._pool.execute(
-            "UPDATE runs SET status=$2, result_json=$3::jsonb, completed_at=now() WHERE run_id=$1",
+            """
+            UPDATE runs
+            SET status=$2,
+                result_json=$3::jsonb,
+                completed_at=now(),
+                phase=$4,
+                updated_at=now()
+            WHERE run_id=$1
+            """,
             run_id,
             status,
             json.dumps(result),
+            terminal_phase,
         )
 
     async def get_run(self, run_id: str) -> dict[str, Any] | None:
         await self.connect()
         assert self._pool is not None
         row = await self._pool.fetchrow(
-            "SELECT run_id, objective, mode, status, result_json, created_at, completed_at "
-            "FROM runs WHERE run_id=$1",
+            """
+            SELECT run_id, objective, mode, status, run_kind, phase, phase_detail,
+                   result_json, created_at, updated_at, completed_at
+            FROM runs
+            WHERE run_id=$1
+            """,
             run_id,
         )
-        if row is None:
-            return None
+        return _run_row(row) if row is not None else None
+
+    async def system_status(self) -> dict[str, Any]:
+        """Return a compact operator view of current work and recent production outcomes."""
+        await self.connect()
+        assert self._pool is not None
+        active = await self._pool.fetchrow(
+            """
+            SELECT run_id, objective, mode, status, run_kind, phase, phase_detail,
+                   result_json, created_at, updated_at, completed_at
+            FROM runs
+            WHERE status='RUNNING'
+            ORDER BY CASE WHEN run_kind='AUTONOMOUS' THEN 0 ELSE 1 END,
+                     updated_at DESC
+            LIMIT 1
+            """
+        )
+        latest = await self._pool.fetchrow(
+            """
+            SELECT run_id, objective, mode, status, run_kind, phase, phase_detail,
+                   result_json, created_at, updated_at, completed_at
+            FROM runs
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        )
+        latest_failure = await self._pool.fetchrow(
+            """
+            SELECT run_id, objective, mode, status, run_kind, phase, phase_detail,
+                   result_json, created_at, updated_at, completed_at
+            FROM runs
+            WHERE status='FAILED'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """
+        )
+        last_mutation = await self._pool.fetchrow(
+            """
+            SELECT mutation_id, workflow_id, site_id, target_url, mutation_type,
+                   status, rolled_back, applied_at
+            FROM autonomous_mutations
+            ORDER BY applied_at DESC
+            LIMIT 1
+            """
+        )
+        seven_day = await self._pool.fetchrow(
+            """
+            SELECT
+                count(*) FILTER (WHERE status='VALIDATED' AND rolled_back=false) AS validated,
+                count(*) FILTER (WHERE rolled_back=true) AS rolled_back,
+                count(*) AS total
+            FROM autonomous_mutations
+            WHERE applied_at >= now() - interval '7 days'
+            """
+        )
         return {
-            "run_id": row["run_id"],
-            "objective": row["objective"],
-            "mode": row["mode"],
-            "status": row["status"],
-            "result": row["result_json"],
-            "created_at": row["created_at"].isoformat(),
-            "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+            "state": "RUNNING" if active is not None else "IDLE",
+            "active_run": _run_row(active) if active is not None else None,
+            "latest_run": _run_row(latest) if latest is not None else None,
+            "latest_failure": _run_row(latest_failure) if latest_failure is not None else None,
+            "last_mutation": _mutation_row(last_mutation) if last_mutation is not None else None,
+            "mutations_7d": {
+                "validated": int(seven_day["validated"] or 0) if seven_day else 0,
+                "rolled_back": int(seven_day["rolled_back"] or 0) if seven_day else 0,
+                "total": int(seven_day["total"] or 0) if seven_day else 0,
+            },
         }
 
     async def find_run_by_prefix(self, prefix: str) -> str | None:
@@ -163,6 +262,35 @@ class Ledger:
             verdict,
             outcome_note,
         )
+
+
+def _run_row(row: asyncpg.Record) -> dict[str, Any]:
+    return {
+        "run_id": row["run_id"],
+        "objective": row["objective"],
+        "mode": row["mode"],
+        "status": row["status"],
+        "run_kind": row["run_kind"],
+        "phase": row["phase"],
+        "phase_detail": row["phase_detail"],
+        "result": row["result_json"],
+        "created_at": row["created_at"].isoformat(),
+        "updated_at": row["updated_at"].isoformat(),
+        "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+    }
+
+
+def _mutation_row(row: asyncpg.Record) -> dict[str, Any]:
+    return {
+        "mutation_id": row["mutation_id"],
+        "workflow_id": row["workflow_id"],
+        "site_id": row["site_id"],
+        "target_url": row["target_url"],
+        "mutation_type": row["mutation_type"],
+        "status": row["status"],
+        "rolled_back": bool(row["rolled_back"]),
+        "applied_at": row["applied_at"].isoformat(),
+    }
 
 
 def _int_or_none(value: object) -> int | None:

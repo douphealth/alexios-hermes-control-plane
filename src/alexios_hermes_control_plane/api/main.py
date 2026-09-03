@@ -12,7 +12,7 @@ from alexios_hermes_control_plane.services.telegram import (
 from alexios_hermes_control_plane.services.temporal import WorkflowService
 
 settings = get_settings()
-app = FastAPI(title="Alexios Hermes Control Plane", version="0.3.0")
+app = FastAPI(title="Alexios Hermes Control Plane", version="0.4.0")
 
 
 @app.get("/healthz")
@@ -32,6 +32,20 @@ async def readyz() -> dict[str, object]:
     finally:
         await ledger.close()
     return {"status": "ready" if database_ok else "not_ready", "database": database_ok}
+
+
+@app.get("/v1/system/status")
+async def system_status() -> dict[str, object]:
+    """Operator-facing source of truth for current autonomous activity and recent outcomes."""
+    ledger = Ledger(settings.database_url)
+    try:
+        payload = await ledger.system_status()
+    finally:
+        await ledger.close()
+    payload["autonomous_enabled"] = settings.autonomous_growth_enabled
+    payload["autonomous_mode"] = settings.autonomous_growth_mode
+    payload["production_writes_enabled"] = settings.allow_production_writes
+    return payload
 
 
 @app.post("/v1/runs/portfolio", status_code=status.HTTP_202_ACCEPTED)
@@ -66,8 +80,6 @@ async def submit_feedback(
     run_id: str,
     payload: dict[str, object],
 ) -> dict[str, str]:
-    """Operator verdict on a chosen intervention. Feeds the feedback memory that
-    future runs ingest, so prompts compound instead of repeating rejected advice."""
     rank = payload.get("intervention_rank")
     verdict = str(payload.get("verdict", ""))
     outcome_note = payload.get("outcome_note")

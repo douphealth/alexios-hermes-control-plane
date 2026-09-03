@@ -16,8 +16,22 @@ def _get_ledger() -> Ledger:
 
 
 @activity.defn
-async def ledger_create_run(run_id: str, objective: str, mode: str) -> None:
-    await _get_ledger().create_run(run_id, objective, mode)
+async def ledger_create_run(
+    run_id: str,
+    objective: str,
+    mode: str,
+    run_kind: str = "PORTFOLIO",
+) -> None:
+    await _get_ledger().create_run(run_id, objective, mode, run_kind)
+
+
+@activity.defn
+async def ledger_update_run_phase(
+    run_id: str,
+    phase: str,
+    detail: str | None = None,
+) -> None:
+    await _get_ledger().update_run_phase(run_id, phase, detail)
 
 
 @activity.defn
