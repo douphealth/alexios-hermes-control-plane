@@ -6,6 +6,11 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from alexios_hermes_control_plane.activities.implementation import run_implementer
+    from alexios_hermes_control_plane.activities.ledger import (
+        ledger_complete_run,
+        ledger_create_run,
+        ledger_update_run_phase,
+    )
     from alexios_hermes_control_plane.activities.mutation_guard import (
         mutation_candidate_eligible,
         mutation_target_eligible,
@@ -44,16 +49,43 @@ class AutonomousGrowthWorkflow:
         max_interventions = int(input_payload.get("max_interventions", 3))
         max_mutations_per_site = int(input_payload.get("max_mutations_per_site", 1))
         workflow_id = workflow.info().workflow_id
+        retry = RetryPolicy(maximum_attempts=2)
 
-        analysis_request = PortfolioRunRequest(objective=objective, mode=RunMode.READ_ONLY)
-        analysis_input = PortfolioWorkflowInput(request=analysis_request, notification_chat_id=None)
-        analysis_payload = await workflow.execute_child_workflow(
-            PortfolioOptimizationWorkflow.run,
-            analysis_input.model_dump(mode="json"),
-            id=f"{workflow_id}-analysis",
-            task_queue=workflow.info().task_queue,
+        await workflow.execute_activity(
+            ledger_create_run,
+            args=[workflow_id, objective, requested_mode.value, "AUTONOMOUS"],
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=retry,
         )
-        analysis = PortfolioRunResult.model_validate(analysis_payload)
+        await self._phase(workflow_id, "ANALYZING", "Collecting evidence and running specialists")
+
+        try:
+            analysis_request = PortfolioRunRequest(objective=objective, mode=RunMode.READ_ONLY)
+            analysis_input = PortfolioWorkflowInput(
+                request=analysis_request,
+                notification_chat_id=None,
+            )
+            analysis_payload = await workflow.execute_child_workflow(
+                PortfolioOptimizationWorkflow.run,
+                analysis_input.model_dump(mode="json"),
+                id=f"{workflow_id}-analysis",
+                task_queue=workflow.info().task_queue,
+            )
+            analysis = PortfolioRunResult.model_validate(analysis_payload)
+        except Exception as exc:
+            failure = {
+                "workflow_id": workflow_id,
+                "mode": requested_mode.value,
+                "status": "FAILED",
+                "error": f"{type(exc).__name__}: {str(exc)[:1600]}",
+            }
+            await workflow.execute_activity(
+                ledger_complete_run,
+                args=[workflow_id, "FAILED", failure],
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+            raise
 
         plans: list[dict[str, Any]] = []
         receipts: list[dict[str, Any]] = []
@@ -69,6 +101,12 @@ class AutonomousGrowthWorkflow:
                 "execution_skips": execution_skips,
                 "production_writes_attempted": False,
             }
+            await workflow.execute_activity(
+                ledger_complete_run,
+                args=[workflow_id, "DONE", result],
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
             if notification_chat_id is not None:
                 message = (
                     f"AUTONOMOUS GROWTH CYCLE {workflow_id}\n"
@@ -88,11 +126,20 @@ class AutonomousGrowthWorkflow:
             return result
 
         site_mutations: dict[str, int] = {}
-        retry = RetryPolicy(maximum_attempts=2)
+        await self._phase(
+            workflow_id,
+            "SELECTING",
+            f"Analysis status={analysis.status}; evaluating evidence-gated interventions",
+        )
 
         if analysis.status == "DONE":
             for intervention in analysis.interventions[:max_interventions]:
                 try:
+                    await self._phase(
+                        workflow_id,
+                        "GUARDING",
+                        f"Checking mutation eligibility for {intervention.target}",
+                    )
                     resolved = cast(
                         dict[str, Any],
                         await workflow.execute_activity(
@@ -132,6 +179,11 @@ class AutonomousGrowthWorkflow:
                         )
                         continue
 
+                    await self._phase(
+                        workflow_id,
+                        "IMPLEMENTING",
+                        f"Preparing safe implementation plan for {intervention.target}",
+                    )
                     snapshot = cast(
                         dict[str, Any],
                         await workflow.execute_activity(
@@ -201,6 +253,11 @@ class AutonomousGrowthWorkflow:
                         except Exception:
                             baseline = {}
 
+                        await self._phase(
+                            workflow_id,
+                            "WRITING",
+                            f"Applying {mutation.mutation_type.value} to {mutation.target_url}",
+                        )
                         apply_args = [mutation_payload, snapshot, requested_mode.value]
                         applied_payload = cast(
                             dict[str, Any],
@@ -213,6 +270,11 @@ class AutonomousGrowthWorkflow:
                         )
                         applied = MutationReceipt.model_validate(applied_payload)
                         try:
+                            await self._phase(
+                                workflow_id,
+                                "VALIDATING",
+                                f"Validating live result for {mutation.target_url}",
+                            )
                             validated_payload = cast(
                                 dict[str, Any],
                                 await workflow.execute_activity(
@@ -240,6 +302,11 @@ class AutonomousGrowthWorkflow:
                             receipts.append(validated.model_dump(mode="json"))
                             site_mutations[site_id] = site_mutations.get(site_id, 0) + 1
                         except Exception as exc:
+                            await self._phase(
+                                workflow_id,
+                                "ROLLING_BACK",
+                                f"Validation failed; rolling back {mutation.target_url}",
+                            )
                             rolled_back = cast(
                                 dict[str, Any],
                                 await workflow.execute_activity(
@@ -277,6 +344,12 @@ class AutonomousGrowthWorkflow:
             "execution_skips": execution_skips,
             "production_writes_attempted": requested_mode == RunMode.PRODUCTION_APPROVED,
         }
+        await workflow.execute_activity(
+            ledger_complete_run,
+            args=[workflow_id, "DONE", result],
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
         if notification_chat_id is not None:
             validated_count = sum(1 for item in receipts if item.get("status") == "VALIDATED")
             rolled_back_count = sum(1 for item in receipts if item.get("rolled_back") is True)
@@ -296,3 +369,11 @@ class AutonomousGrowthWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=3),
             )
         return result
+
+    async def _phase(self, workflow_id: str, phase: str, detail: str) -> None:
+        await workflow.execute_activity(
+            ledger_update_run_phase,
+            args=[workflow_id, phase, detail],
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
