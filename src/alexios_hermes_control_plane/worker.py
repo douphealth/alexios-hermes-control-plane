@@ -17,6 +17,7 @@ from alexios_hermes_control_plane.activities.ledger import (
     ledger_recent_runs,
     ledger_record_agent_result,
     ledger_record_feedback,
+    ledger_update_run_phase,
 )
 from alexios_hermes_control_plane.activities.mutation_guard import (
     mutation_candidate_eligible,
@@ -72,6 +73,7 @@ async def main() -> None:
             mutation_target_eligible,
             mutation_candidate_eligible,
             ledger_create_run,
+            ledger_update_run_phase,
             ledger_record_agent_result,
             ledger_complete_run,
             ledger_recent_runs,
