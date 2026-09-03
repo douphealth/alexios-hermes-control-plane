@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 from typing import Any
-
 
 _VERDICT_ALIASES = {
     "GROUNDED": "GROUNDED",
@@ -61,7 +58,9 @@ def normalize_verifier_value(value: object) -> object:
         if canonical_verdict is None:
             return value
         if not isinstance(reason, str) or not reason.strip():
-            reason = "Provider returned no reason; verdict retained only after schema normalization."
+            reason = (
+                "Provider returned no reason; verdict retained only after schema normalization."
+            )
         normalized.append(
             {
                 "finding_id": finding_id.strip(),
