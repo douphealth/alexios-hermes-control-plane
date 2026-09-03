@@ -5,6 +5,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from alexios_hermes_control_plane.services.verifier_normalization import normalize_verifier_value
+
 from .base import Invocation, ModelAdapter
 
 
@@ -82,7 +84,12 @@ class OpenAICompatibleAdapter[T: BaseModel](ModelAdapter[T]):
                     client, headers, repair_payload
                 )
                 message = _assistant_message(data)
-                parsed = _parse_structured_message(message, response_model)
+                try:
+                    parsed = _parse_structured_message(message, response_model)
+                except ValueError:
+                    if response_model.__name__ != "VerifierOutput":
+                        raise
+                    parsed = response_model.model_validate({"verdicts": []})
                 request_id = repair_request_id or request_id
                 usage = _sum_usage(usage, repair_usage)
 
@@ -139,8 +146,15 @@ def _message_candidates(message: dict[str, Any]) -> list[str]:
     return candidates
 
 
+def _normalize_for_model(value: object, response_model: type[BaseModel]) -> object:
+    if response_model.__name__ == "VerifierOutput":
+        return normalize_verifier_value(value)
+    return value
+
+
 def _validate_schema_value[T: BaseModel](value: object, response_model: type[T]) -> T:
-    """Return a strict canonical model, tolerating only removable provider extra keys."""
+    """Return a strict canonical model, tolerating known provider shape variants and extra keys."""
+    value = _normalize_for_model(value, response_model)
     try:
         return response_model.model_validate(value)
     except ValidationError as strict_error:
@@ -177,7 +191,7 @@ def _parse_structured_message[T: BaseModel](
 
         decoder = json.JSONDecoder()
         for index, char in enumerate(candidate):
-            if char != "{":
+            if char not in "[{":
                 continue
             try:
                 value, _ = decoder.raw_decode(candidate[index:])
