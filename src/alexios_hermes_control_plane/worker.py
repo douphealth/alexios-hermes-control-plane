@@ -18,6 +18,10 @@ from alexios_hermes_control_plane.activities.ledger import (
     ledger_record_agent_result,
     ledger_record_feedback,
 )
+from alexios_hermes_control_plane.activities.mutation_guard import (
+    mutation_candidate_eligible,
+    mutation_target_eligible,
+)
 from alexios_hermes_control_plane.activities.notifications import notify_telegram
 from alexios_hermes_control_plane.activities.outcomes import (
     capture_gsc_baselines,
@@ -65,6 +69,8 @@ async def main() -> None:
             list_due_measurements,
             measure_and_record_outcome,
             recent_outcome_memory,
+            mutation_target_eligible,
+            mutation_candidate_eligible,
             ledger_create_run,
             ledger_record_agent_result,
             ledger_complete_run,

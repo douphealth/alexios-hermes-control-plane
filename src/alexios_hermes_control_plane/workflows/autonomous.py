@@ -6,6 +6,10 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from alexios_hermes_control_plane.activities.implementation import run_implementer
+    from alexios_hermes_control_plane.activities.mutation_guard import (
+        mutation_candidate_eligible,
+        mutation_target_eligible,
+    )
     from alexios_hermes_control_plane.activities.notifications import notify_telegram
     from alexios_hermes_control_plane.activities.outcomes import (
         capture_gsc_baselines,
@@ -26,6 +30,8 @@ with workflow.unsafe.imports_passed_through():
     )
     from alexios_hermes_control_plane.schemas.execution import ImplementationPlan, MutationReceipt
     from alexios_hermes_control_plane.workflows.portfolio import PortfolioOptimizationWorkflow
+
+_URL_COOLDOWN_DAYS = 7
 
 
 @workflow.defn
@@ -51,9 +57,8 @@ class AutonomousGrowthWorkflow:
 
         plans: list[dict[str, Any]] = []
         receipts: list[dict[str, Any]] = []
+        execution_skips: list[dict[str, Any]] = []
 
-        # READ_ONLY is a pure intelligence cycle. It must not require WordPress
-        # credentials, resolve targets, call the implementer, or touch live sites.
         if requested_mode == RunMode.READ_ONLY:
             result = {
                 "workflow_id": workflow_id,
@@ -61,6 +66,7 @@ class AutonomousGrowthWorkflow:
                 "analysis": analysis.model_dump(mode="json"),
                 "implementation_plans": plans,
                 "mutation_receipts": receipts,
+                "execution_skips": execution_skips,
                 "production_writes_attempted": False,
             }
             if notification_chat_id is not None:
@@ -70,6 +76,7 @@ class AutonomousGrowthWorkflow:
                     "Plans: 0\n"
                     "Validated mutations: 0\n"
                     "Rolled back: 0\n"
+                    "Guarded skips: 0\n"
                     "Mode: READ_ONLY"
                 )
                 await workflow.execute_activity(
@@ -97,7 +104,34 @@ class AutonomousGrowthWorkflow:
                     )
                     site_id = str(resolved["site_id"])
                     if site_mutations.get(site_id, 0) >= max_mutations_per_site:
+                        execution_skips.append(
+                            {
+                                "target": intervention.target,
+                                "reason": "SITE_MUTATION_BUDGET_EXHAUSTED",
+                                "site_id": site_id,
+                            }
+                        )
                         continue
+
+                    target_guard = cast(
+                        dict[str, Any],
+                        await workflow.execute_activity(
+                            mutation_target_eligible,
+                            args=[site_id, intervention.target, _URL_COOLDOWN_DAYS],
+                            start_to_close_timeout=timedelta(seconds=30),
+                            retry_policy=retry,
+                        ),
+                    )
+                    if not bool(target_guard.get("eligible")):
+                        execution_skips.append(
+                            {
+                                "target": intervention.target,
+                                "site_id": site_id,
+                                **target_guard,
+                            }
+                        )
+                        continue
+
                     snapshot = cast(
                         dict[str, Any],
                         await workflow.execute_activity(
@@ -132,6 +166,27 @@ class AutonomousGrowthWorkflow:
                     for mutation in plan.mutations:
                         if site_mutations.get(site_id, 0) >= max_mutations_per_site:
                             break
+                        mutation_payload = mutation.model_dump(mode="json")
+                        candidate_guard = cast(
+                            dict[str, Any],
+                            await workflow.execute_activity(
+                                mutation_candidate_eligible,
+                                args=[mutation_payload, _URL_COOLDOWN_DAYS],
+                                start_to_close_timeout=timedelta(seconds=30),
+                                retry_policy=retry,
+                            ),
+                        )
+                        if not bool(candidate_guard.get("eligible")):
+                            execution_skips.append(
+                                {
+                                    "target": mutation.target_url,
+                                    "site_id": site_id,
+                                    "mutation_id": mutation.mutation_id,
+                                    **candidate_guard,
+                                }
+                            )
+                            continue
+
                         baseline: dict[str, Any] = {}
                         try:
                             baseline = cast(
@@ -146,7 +201,6 @@ class AutonomousGrowthWorkflow:
                         except Exception:
                             baseline = {}
 
-                        mutation_payload = mutation.model_dump(mode="json")
                         apply_args = [mutation_payload, snapshot, requested_mode.value]
                         applied_payload = cast(
                             dict[str, Any],
@@ -220,6 +274,7 @@ class AutonomousGrowthWorkflow:
             "analysis": analysis.model_dump(mode="json"),
             "implementation_plans": plans,
             "mutation_receipts": receipts,
+            "execution_skips": execution_skips,
             "production_writes_attempted": requested_mode == RunMode.PRODUCTION_APPROVED,
         }
         if notification_chat_id is not None:
@@ -231,6 +286,7 @@ class AutonomousGrowthWorkflow:
                 f"Plans: {len(plans)}\n"
                 f"Validated mutations: {validated_count}\n"
                 f"Rolled back: {rolled_back_count}\n"
+                f"Guarded skips: {len(execution_skips)}\n"
                 f"Mode: {requested_mode.value}"
             )
             await workflow.execute_activity(
