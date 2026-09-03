@@ -39,7 +39,11 @@ def _deterministic_mutation_id(mutation: WordPressMutation) -> str:
 
 
 def _is_noop(mutation: WordPressMutation, snapshot: WordPressSnapshot) -> bool:
-    current = snapshot.title_raw if mutation.mutation_type.value == "TITLE" else snapshot.content_raw
+    current = (
+        snapshot.title_raw
+        if mutation.mutation_type.value == "TITLE"
+        else snapshot.content_raw
+    )
     return mutation.value.strip() == current.strip()
 
 
