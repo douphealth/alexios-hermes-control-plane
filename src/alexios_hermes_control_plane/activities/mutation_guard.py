@@ -15,11 +15,7 @@ async def mutation_target_eligible(
     target_url: str,
     cooldown_days: int = _DEFAULT_COOLDOWN_DAYS,
 ) -> dict[str, Any]:
-    """Reject recently changed URLs before an expensive implementer call.
-
-    A validated, non-rolled-back mutation needs time to accumulate a measurable search signal.
-    The guard is deliberately conservative: it never overrides a recent successful write.
-    """
+    """Reject recently changed URLs before an expensive implementer call."""
     if cooldown_days < 1:
         raise ValueError("cooldown_days must be >= 1")
     settings = get_settings()
@@ -27,7 +23,8 @@ async def mutation_target_eligible(
     try:
         row = await connection.fetchrow(
             """
-            SELECT mutation_id, mutation_type, applied_at
+            SELECT mutation_id, mutation_type, applied_at,
+                   applied_at <= now() - ($3 * interval '1 day') AS cooldown_matured
             FROM autonomous_mutations
             WHERE site_id=$1
               AND rtrim(target_url, '/')=rtrim($2, '/')
@@ -38,30 +35,20 @@ async def mutation_target_eligible(
             """,
             site_id,
             target_url,
+            cooldown_days,
         )
     finally:
         await connection.close()
     if row is None:
         return {"eligible": True, "reason": "NO_PRIOR_VALIDATED_MUTATION"}
-
-    applied_at = row["applied_at"]
-    connection = await asyncpg.connect(settings.database_url)
-    try:
-        recent = await connection.fetchval(
-            "SELECT $1::timestamptz > now() - ($2 * interval '1 day')",
-            applied_at,
-            cooldown_days,
-        )
-    finally:
-        await connection.close()
-    if bool(recent):
+    if not bool(row["cooldown_matured"]):
         return {
             "eligible": False,
             "reason": "URL_COOLDOWN_ACTIVE",
             "cooldown_days": cooldown_days,
             "prior_mutation_id": str(row["mutation_id"]),
             "prior_mutation_type": str(row["mutation_type"]),
-            "applied_at": applied_at.isoformat(),
+            "applied_at": row["applied_at"].isoformat(),
         }
     return {
         "eligible": True,
