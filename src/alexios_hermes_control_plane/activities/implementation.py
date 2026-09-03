@@ -1,3 +1,4 @@
+import hashlib
 import json
 from typing import Any
 
@@ -6,7 +7,11 @@ from temporalio import activity
 from alexios_hermes_control_plane.config import get_settings
 from alexios_hermes_control_plane.models.registry import ModelRegistry
 from alexios_hermes_control_plane.schemas.common import Intervention
-from alexios_hermes_control_plane.schemas.execution import ImplementationPlan, WordPressSnapshot
+from alexios_hermes_control_plane.schemas.execution import (
+    ImplementationPlan,
+    WordPressMutation,
+    WordPressSnapshot,
+)
 
 _IMPLEMENTER_SYSTEM = """You are the guarded WordPress implementer for an autonomous
 organic-growth system. Create the smallest high-confidence change that implements the approved
@@ -17,6 +22,25 @@ credentials. Prefer one mutation. Use only TITLE or CONTENT mutations. Do not ch
 status, plugins, themes, canonical tags, or site-wide settings. Every mutation must cite evidence
 IDs from the approved intervention. If the intervention cannot be safely implemented from the
 supplied snapshot, return zero mutations."""
+
+
+def _deterministic_mutation_id(mutation: WordPressMutation) -> str:
+    canonical = "\x1f".join(
+        (
+            mutation.site_id,
+            str(mutation.post_id),
+            mutation.target_url.rstrip("/"),
+            mutation.mutation_type.value,
+            mutation.value.strip(),
+        )
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+    return f"mutation-{digest}"
+
+
+def _is_noop(mutation: WordPressMutation, snapshot: WordPressSnapshot) -> bool:
+    current = snapshot.title_raw if mutation.mutation_type.value == "TITLE" else snapshot.content_raw
+    return mutation.value.strip() == current.strip()
 
 
 @activity.defn
@@ -50,6 +74,7 @@ async def run_implementer(
     )
     plan = ImplementationPlan.model_validate(invocation.output)
     allowed_evidence = set(intervention.evidence_ids)
+    normalized_mutations: list[WordPressMutation] = []
     for mutation in plan.mutations:
         if mutation.site_id != snapshot.site_id:
             raise ValueError("Implementer changed the target site")
@@ -59,6 +84,12 @@ async def run_implementer(
             raise ValueError("Implementer changed the approved target URL")
         if not set(mutation.evidence_ids).issubset(allowed_evidence):
             raise ValueError("Implementer referenced evidence outside the approved intervention")
+        if _is_noop(mutation, snapshot):
+            continue
+        normalized_mutations.append(
+            mutation.model_copy(update={"mutation_id": _deterministic_mutation_id(mutation)})
+        )
+    plan = plan.model_copy(update={"mutations": normalized_mutations})
     return {
         "plan": plan.model_dump(mode="json"),
         "telemetry": {
