@@ -63,8 +63,7 @@ def _compact_evidence(
     return compact
 
 
-@activity.defn
-async def run_astra_review_if_needed(
+async def review_with_astra_if_needed(
     objective: str, judge_output_payload: dict[str, Any], context: dict[str, Any]
 ) -> dict[str, Any]:
     """Escalate only ambiguous/high-stakes decisions and hard-cap rolling usage."""
@@ -90,65 +89,66 @@ async def run_astra_review_if_needed(
     ledger = Ledger(settings.database_url)
     try:
         usage = await ledger.agent_usage_last_hours("astra_reviewer", 24)
+        allowed, budget_reason = budget_allows(usage, settings)
+        if not allowed:
+            return {**skipped, "skip_reason": budget_reason, "rolling_usage": usage}
+
+        evidence = _compact_evidence(
+            context,
+            judge_output,
+            settings.astra_max_evidence_items,
+            settings.astra_evidence_row_limit,
+        )
+        target = registry.get("astra_reviewer")
+        user_payload = {
+            "objective": objective,
+            "escalation_reasons": reasons,
+            "interventions": judge_output.model_dump(mode="json")["interventions"],
+            "evidence": evidence,
+        }
+        invocation = await target.adapter.invoke_structured(
+            model=target.model,
+            system=_ASTRA_REVIEW_PROMPT,
+            user=json.dumps(user_payload, default=str, separators=(",", ":")),
+            response_model=AstraReviewOutput,
+            prompt_cache_key=f"ahcp:astra-review:{_ASTRA_PROMPT_VERSION}",
+        )
+        review = AstraReviewOutput.model_validate(invocation.output)
+        reviewed = apply_astra_review(judge_output, review)
+        telemetry = {
+            "agent": "astra_reviewer",
+            "model": target.model,
+            "prompt_version": _ASTRA_PROMPT_VERSION,
+            "provider_request_id": invocation.provider_request_id,
+            "latency_ms": invocation.latency_ms,
+            "input_tokens": invocation.input_tokens,
+            "cached_input_tokens": invocation.cached_input_tokens,
+            "output_tokens": invocation.output_tokens,
+            "total_tokens": invocation.total_tokens,
+            "status": "SUCCESS",
+            "summary": review.summary,
+            "findings": [],
+            "evidence_ids": sorted(
+                {
+                    evidence_id
+                    for intervention in judge_output.interventions
+                    for evidence_id in intervention.evidence_ids
+                }
+            ),
+            "assumptions": [],
+            "error": None,
+            "escalation_reasons": reasons,
+            "rolling_usage_before_call": usage,
+        }
+        await ledger.record_agent_result(activity.info().workflow_id, telemetry)
+        return {
+            "invoked": True,
+            "reasons": reasons,
+            "skip_reason": None,
+            "judge_output": reviewed.model_dump(mode="json"),
+            "review": review.model_dump(mode="json"),
+            "telemetry": telemetry,
+            "rolling_usage": usage,
+        }
     finally:
         await ledger.close()
-    allowed, budget_reason = budget_allows(usage, settings)
-    if not allowed:
-        return {**skipped, "skip_reason": budget_reason, "rolling_usage": usage}
-
-    evidence = _compact_evidence(
-        context,
-        judge_output,
-        settings.astra_max_evidence_items,
-        settings.astra_evidence_row_limit,
-    )
-    target = registry.get("astra_reviewer")
-    user_payload = {
-        "objective": objective,
-        "escalation_reasons": reasons,
-        "interventions": judge_output.model_dump(mode="json")["interventions"],
-        "evidence": evidence,
-    }
-    invocation = await target.adapter.invoke_structured(
-        model=target.model,
-        system=_ASTRA_REVIEW_PROMPT,
-        user=json.dumps(user_payload, default=str, separators=(",", ":")),
-        response_model=AstraReviewOutput,
-        prompt_cache_key=f"ahcp:astra-review:{_ASTRA_PROMPT_VERSION}",
-    )
-    review = AstraReviewOutput.model_validate(invocation.output)
-    reviewed = apply_astra_review(judge_output, review)
-    telemetry = {
-        "agent": "astra_reviewer",
-        "model": target.model,
-        "prompt_version": _ASTRA_PROMPT_VERSION,
-        "provider_request_id": invocation.provider_request_id,
-        "latency_ms": invocation.latency_ms,
-        "input_tokens": invocation.input_tokens,
-        "cached_input_tokens": invocation.cached_input_tokens,
-        "output_tokens": invocation.output_tokens,
-        "total_tokens": invocation.total_tokens,
-        "status": "SUCCESS",
-        "summary": review.summary,
-        "findings": [],
-        "evidence_ids": sorted(
-            {
-                evidence_id
-                for intervention in judge_output.interventions
-                for evidence_id in intervention.evidence_ids
-            }
-        ),
-        "assumptions": [],
-        "error": None,
-        "escalation_reasons": reasons,
-        "rolling_usage_before_call": usage,
-    }
-    return {
-        "invoked": True,
-        "reasons": reasons,
-        "skip_reason": None,
-        "judge_output": reviewed.model_dump(mode="json"),
-        "review": review.model_dump(mode="json"),
-        "telemetry": telemetry,
-        "rolling_usage": usage,
-    }
