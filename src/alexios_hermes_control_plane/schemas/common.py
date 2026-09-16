@@ -157,3 +157,4 @@ class PortfolioRunResult(StrictModel):
     status: str
     interventions: list[Intervention]
     specialist_results: list[AgentResult]
+    astra: dict[str, Any] = Field(default_factory=dict)
