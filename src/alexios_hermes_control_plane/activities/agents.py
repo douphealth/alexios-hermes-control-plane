@@ -282,7 +282,7 @@ async def run_judge(
         )
         final_output = JudgeOutput.model_validate(astra_result["judge_output"])
     except Exception as exc:
-        # Astra is an optional quality layer. Provider/budget failures never break the proven Sol path.
+        # Optional quality layer: Astra failures never break the proven Sol path.
         astra_result = {
             "invoked": False,
             "skip_reason": "ASTRA_REVIEW_FAILED_OPEN_TO_SOL",
