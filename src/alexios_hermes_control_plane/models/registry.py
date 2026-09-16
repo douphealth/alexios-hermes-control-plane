@@ -44,6 +44,7 @@ class ModelRegistry:
                         api_key=s.openai_api_key,
                         base_url=s.openai_base_url,
                         reasoning_effort=s.openai_astra_reasoning,
+                        max_output_tokens=1200,
                     ),
                     s.openai_astra_model,
                 )
