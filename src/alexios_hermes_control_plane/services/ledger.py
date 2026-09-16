@@ -132,6 +132,32 @@ class Ledger:
             )
         return out
 
+    async def agent_usage_last_hours(self, agent: str, hours: int = 24) -> dict[str, int]:
+        """Return rolling successful-call and token totals for a scarce model role."""
+        await self.connect()
+        assert self._pool is not None
+        row = await self._pool.fetchrow(
+            """
+            SELECT count(*)::int AS calls,
+                   coalesce(sum(total_tokens), 0)::bigint AS total_tokens,
+                   coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
+                   coalesce(sum(output_tokens), 0)::bigint AS output_tokens
+            FROM agent_results
+            WHERE agent = $1
+              AND created_at >= now() - ($2::text || ' hours')::interval
+              AND model <> 'not-invoked'
+            """,
+            agent,
+            hours,
+        )
+        assert row is not None
+        return {
+            "calls": int(row["calls"] or 0),
+            "total_tokens": int(row["total_tokens"] or 0),
+            "input_tokens": int(row["input_tokens"] or 0),
+            "output_tokens": int(row["output_tokens"] or 0),
+        }
+
     async def recent_feedback(self, limit: int) -> list[dict[str, Any]]:
         """Operator verdicts on past interventions — the feedback loop's memory."""
         await self.connect()
