@@ -18,9 +18,12 @@ def escalation_reasons(judge_output: JudgeOutput, settings: Settings) -> list[st
     if len(interventions) >= 2:
         first = interventions[0].decision_score
         second = interventions[1].decision_score
-        if first is not None and second is not None:
-            if abs(first - second) <= settings.astra_ambiguity_score_gap:
-                reasons.add("AMBIGUOUS_TOP_DECISION")
+        if (
+            first is not None
+            and second is not None
+            and abs(first - second) <= settings.astra_ambiguity_score_gap
+        ):
+            reasons.add("AMBIGUOUS_TOP_DECISION")
 
     for item in interventions:
         if (
