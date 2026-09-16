@@ -18,10 +18,12 @@ class OpenAIResponsesAdapter[T: BaseModel](ModelAdapter[T]):
         api_key: str,
         base_url: str = "https://api.openai.com/v1",
         reasoning_effort: str = "medium",
+        max_output_tokens: int | None = None,
         timeout: float = 180.0,
     ) -> None:
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
         self.reasoning_effort = reasoning_effort
+        self.max_output_tokens = max_output_tokens
 
     async def invoke_structured(
         self,
@@ -33,6 +35,9 @@ class OpenAIResponsesAdapter[T: BaseModel](ModelAdapter[T]):
         prompt_cache_key: str | None = None,
     ) -> Invocation[T]:
         started = monotonic()
+        request_options: dict[str, int] = {}
+        if self.max_output_tokens is not None:
+            request_options["max_output_tokens"] = self.max_output_tokens
         response = await self.client.responses.parse(
             model=model,
             instructions=system,
@@ -41,6 +46,7 @@ class OpenAIResponsesAdapter[T: BaseModel](ModelAdapter[T]):
             reasoning={"effort": self.reasoning_effort},  # type: ignore[arg-type]
             store=False,
             prompt_cache_key=prompt_cache_key,
+            **request_options,  # type: ignore[arg-type]
         )
         parsed = response.output_parsed
         if parsed is None:
