@@ -47,11 +47,14 @@ class OpenAIResponsesAdapter[T: BaseModel](ModelAdapter[T]):
             raise ValueError("OpenAI Responses API returned no parsed structured output")
 
         usage = response.usage
+        input_details = getattr(usage, "input_tokens_details", None) if usage else None
+        cached_tokens = getattr(input_details, "cached_tokens", None) if input_details else None
         return Invocation(
             output=parsed,
             provider_request_id=response.id,
             latency_ms=round((monotonic() - started) * 1000),
             input_tokens=getattr(usage, "input_tokens", None) if usage else None,
+            cached_input_tokens=cached_tokens,
             output_tokens=getattr(usage, "output_tokens", None) if usage else None,
             total_tokens=getattr(usage, "total_tokens", None) if usage else None,
         )
