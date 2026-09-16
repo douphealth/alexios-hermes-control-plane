@@ -4,6 +4,7 @@ from typing import Any
 
 from temporalio import activity
 
+from alexios_hermes_control_plane.activities.astra import review_with_astra_if_needed
 from alexios_hermes_control_plane.config import get_settings
 from alexios_hermes_control_plane.models.registry import ModelRegistry
 from alexios_hermes_control_plane.prompts import PROMPT_VERSION, ROLE_PROMPTS, SPECIALIST_ROLES
@@ -219,7 +220,7 @@ async def run_judge(
     specialist_results: list[dict[str, Any]],
     context: dict[str, Any],
 ) -> dict[str, Any]:
-    """Final judge with deterministic evidence eligibility and decision scoring."""
+    """Final judge with deterministic evidence eligibility and scarce Astra escalation."""
     from alexios_hermes_control_plane.services.scoring import decision_score
 
     eligible_results = _eligible_specialist_results(specialist_results)
@@ -241,6 +242,7 @@ async def run_judge(
                 "output_tokens": 0,
                 "total_tokens": 0,
             },
+            "astra": {"invoked": False, "skip_reason": "NO_ELIGIBLE_FINDINGS"},
         }
 
     registry = ModelRegistry(get_settings())
@@ -271,8 +273,24 @@ async def run_judge(
         scored.append(intervention.model_copy(update={"decision_score": score}))
     ranked = sorted(scored, key=lambda item: (item.decision_score or 0), reverse=True)
     reranked = [item.model_copy(update={"rank": index}) for index, item in enumerate(ranked, 1)]
+    final_output = JudgeOutput(interventions=reranked)
+
+    astra_result: dict[str, Any]
+    try:
+        astra_result = await review_with_astra_if_needed(
+            objective, final_output.model_dump(mode="json"), context
+        )
+        final_output = JudgeOutput.model_validate(astra_result["judge_output"])
+    except Exception as exc:
+        # Optional quality layer: Astra failures never break the proven Sol path.
+        astra_result = {
+            "invoked": False,
+            "skip_reason": "ASTRA_REVIEW_FAILED_OPEN_TO_SOL",
+            "error": f"{type(exc).__name__}: {str(exc)[:1000]}",
+        }
+
     return {
-        "judge_output": JudgeOutput(interventions=reranked).model_dump(mode="json"),
+        "judge_output": final_output.model_dump(mode="json"),
         "telemetry": {
             "agent": "judge",
             "model": target.model,
@@ -280,7 +298,9 @@ async def run_judge(
             "provider_request_id": invocation.provider_request_id,
             "latency_ms": invocation.latency_ms,
             "input_tokens": invocation.input_tokens,
+            "cached_input_tokens": invocation.cached_input_tokens,
             "output_tokens": invocation.output_tokens,
             "total_tokens": invocation.total_tokens,
         },
+        "astra": astra_result,
     }

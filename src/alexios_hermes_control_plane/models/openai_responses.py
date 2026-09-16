@@ -18,10 +18,12 @@ class OpenAIResponsesAdapter[T: BaseModel](ModelAdapter[T]):
         api_key: str,
         base_url: str = "https://api.openai.com/v1",
         reasoning_effort: str = "medium",
+        max_output_tokens: int | None = None,
         timeout: float = 180.0,
     ) -> None:
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
         self.reasoning_effort = reasoning_effort
+        self.max_output_tokens = max_output_tokens
 
     async def invoke_structured(
         self,
@@ -33,6 +35,9 @@ class OpenAIResponsesAdapter[T: BaseModel](ModelAdapter[T]):
         prompt_cache_key: str | None = None,
     ) -> Invocation[T]:
         started = monotonic()
+        request_options: dict[str, int] = {}
+        if self.max_output_tokens is not None:
+            request_options["max_output_tokens"] = self.max_output_tokens
         response = await self.client.responses.parse(
             model=model,
             instructions=system,
@@ -41,17 +46,21 @@ class OpenAIResponsesAdapter[T: BaseModel](ModelAdapter[T]):
             reasoning={"effort": self.reasoning_effort},  # type: ignore[arg-type]
             store=False,
             prompt_cache_key=prompt_cache_key,
+            **request_options,  # type: ignore[arg-type]
         )
         parsed = response.output_parsed
         if parsed is None:
             raise ValueError("OpenAI Responses API returned no parsed structured output")
 
         usage = response.usage
+        input_details = getattr(usage, "input_tokens_details", None) if usage else None
+        cached_tokens = getattr(input_details, "cached_tokens", None) if input_details else None
         return Invocation(
             output=parsed,
             provider_request_id=response.id,
             latency_ms=round((monotonic() - started) * 1000),
             input_tokens=getattr(usage, "input_tokens", None) if usage else None,
+            cached_input_tokens=cached_tokens,
             output_tokens=getattr(usage, "output_tokens", None) if usage else None,
             total_tokens=getattr(usage, "total_tokens", None) if usage else None,
         )

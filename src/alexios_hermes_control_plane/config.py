@@ -38,6 +38,20 @@ class Settings(BaseSettings):
     openai_sol_model: str = "gpt-5.6-sol"
     openai_sol_reasoning: str = "xhigh"
 
+    # Astra is a scarce escalation layer, never a default worker. It is disabled until the
+    # operator explicitly opts in because ChatGPT Business and API usage are billed separately.
+    openai_astra_model: str = "gpt-6-astra"
+    openai_astra_reasoning: str = "low"
+    astra_escalation_enabled: bool = False
+    astra_max_calls_per_24h: int = Field(default=2, ge=0, le=24)
+    astra_max_total_tokens_per_24h: int = Field(default=80000, ge=1000, le=10_000_000)
+    astra_ambiguity_score_gap: float = Field(default=6.0, ge=0.0, le=100.0)
+    astra_low_confidence_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
+    astra_high_impact_threshold: int = Field(default=8, ge=0, le=10)
+    astra_high_revenue_threshold: int = Field(default=8, ge=0, le=10)
+    astra_max_evidence_items: int = Field(default=8, ge=1, le=30)
+    astra_evidence_row_limit: int = Field(default=4, ge=1, le=20)
+
     glm_api_key: str | None = None
     glm_base_url: str | None = None
     glm_model: str = "glm-5.3"

@@ -10,6 +10,7 @@ class Invocation[T: BaseModel]:
     provider_request_id: str | None = None
     latency_ms: int | None = None
     input_tokens: int | None = None
+    cached_input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
 

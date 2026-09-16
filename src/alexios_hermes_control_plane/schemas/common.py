@@ -98,6 +98,18 @@ class Intervention(StrictModel):
     decision_score: float | None = Field(default=None, ge=0, le=100)
 
 
+class AstraReviewDecision(StrictModel):
+    rank: int = Field(ge=1, le=3)
+    verdict: Literal["KEEP", "DROP"]
+    confidence_multiplier: float = Field(default=1.0, ge=0.5, le=1.0)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class AstraReviewOutput(StrictModel):
+    decisions: list[AstraReviewDecision] = Field(default_factory=list, max_length=3)
+    summary: str = Field(min_length=1, max_length=1000)
+
+
 class VerifierOutput(StrictModel):
     verdicts: list[VerificationVerdict] = Field(default_factory=list, max_length=40)
 

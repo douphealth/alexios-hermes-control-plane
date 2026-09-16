@@ -38,6 +38,16 @@ class ModelRegistry:
                     ),
                     model,
                 )
+            if s.astra_escalation_enabled:
+                self._targets["astra_reviewer"] = ModelTarget(
+                    OpenAIResponsesAdapter(
+                        api_key=s.openai_api_key,
+                        base_url=s.openai_base_url,
+                        reasoning_effort=s.openai_astra_reasoning,
+                        max_output_tokens=1200,
+                    ),
+                    s.openai_astra_model,
+                )
 
         if s.glm_base_url and s.glm_api_key:
             self._targets["diagnostician"] = ModelTarget(
