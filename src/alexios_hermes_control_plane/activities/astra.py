@@ -140,7 +140,10 @@ async def review_with_astra_if_needed(
             "escalation_reasons": reasons,
             "rolling_usage_before_call": usage,
         }
-        await ledger.record_agent_result(activity.info().workflow_id, telemetry)
+        workflow_id = activity.info().workflow_id
+        if workflow_id is None:
+            raise RuntimeError("Astra review requires a workflow-backed activity")
+        await ledger.record_agent_result(workflow_id, telemetry)
         return {
             "invoked": True,
             "reasons": reasons,
