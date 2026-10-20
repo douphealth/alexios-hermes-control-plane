@@ -8,7 +8,7 @@ import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -62,7 +62,10 @@ def list_repos(owner: str, gh_token: str | None, include_private: bool) -> list[
         batch = get_json(f"{base}&page={page}", gh_token)
         if not isinstance(batch, list):
             raise ValueError("Unexpected GitHub response")
-        repos.extend(x for x in batch if x.get("owner", {}).get("login", "").lower() == owner.lower())
+        repos.extend(
+            x for x in batch
+            if x.get("owner", {}).get("login", "").lower() == owner.lower()
+        )
         if len(batch) < 100:
             break
         page += 1
@@ -140,18 +143,20 @@ def make_report(rows: list[dict], projects: dict[str, str] | None, owner: str) -
     lines = [
         f"# Supabase portfolio recovery audit: {owner}",
         "",
-        f"Generated UTC: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        f"Generated UTC: {datetime.now(UTC).isoformat(timespec='seconds')}",
         "",
         f"Repositories checked: {len(rows)}",
         f"Repositories with Supabase code/config evidence: {len(used)}",
         f"Distinct configured project references: {len(refs)}",
-        f"Repositories tracking potentially sensitive .env files: {sum(r['committed_env'] for r in rows)}",
+        "Repositories tracking potentially sensitive .env files: "
+        f"{sum(r['committed_env'] for r in rows)}",
         f"Incomplete repository inspections: {sum(bool(r['error']) for r in rows)}",
         "",
         "Missing management access DOES NOT prove a project was deleted. "
         "HTTP 401/403 means the Auth endpoint responds, not that the database works.",
         "",
-        "| Repository | Ref | Management status | Auth reachability | Functions | JWT-disabled | .env tracked |",
+        "| Repository | Ref | Management status | Auth reachability | "
+        "Functions | JWT-disabled | .env tracked |",
         "|---|---|---|---|---:|---:|---|",
     ]
     for row in sorted(used, key=lambda x: x["repository"]):
@@ -171,12 +176,15 @@ def make_report(rows: list[dict], projects: dict[str, str] | None, owner: str) -
         "",
         "1. Restore access to the ORIGINAL Supabase organization and project IDs.",
         "2. Record project status and back up data before any migration or schema change.",
-        "3. Review gateway-JWT-disabled functions for independent authentication and rate limiting.",
+        "3. Review JWT-disabled functions for independent authentication,"
+        " authorization and rate limiting.",
         "4. Privately inspect committed .env values; rotate ONLY confirmed exposed secrets.",
         "5. Deploy missing Edge Functions to verified project IDs using reviewed changes.",
-        "6. Verify Auth, RLS, data operations, Stripe payments, webhooks, and entitlement recovery.",
+        "6. Verify Auth, RLS, data operations, Stripe payments, webhooks,"
+        " and entitlement recovery.",
         "",
-        "This auditor is GET-only. It never reads .env contents, updates databases, or deploys code.",
+        "This auditor is GET-only. It never reads .env contents, "
+        "updates databases, or deploys code.",
         "",
     ])
     for row in rows:
