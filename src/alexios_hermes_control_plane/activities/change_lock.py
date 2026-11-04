@@ -81,6 +81,14 @@ async def acquire(
         return {**base, "allowed": allowed, "reason": reason, "error": str(exc)[:300]}
     if code == axiom_cc.OK:
         return {**base, "allowed": True, "reason": "LOCK_ACQUIRED", "seq": info.get("seq")}
+    # The protocol client denies a second lock even for the holder. Temporal may
+    # retry this activity after the ref and ledger comment already exist; treating
+    # that as a foreign lock would skip the write and never release it.
+    held_by = info.get("held_by")
+    held_seq = info.get("seq")
+    if isinstance(held_by, dict) and held_by.get("owner") == owner and isinstance(held_seq, int):
+        logger.info("change lock for %s already held by this owner at seq %s", site, held_seq)
+        return {**base, "allowed": True, "reason": "LOCK_ALREADY_HELD", "seq": held_seq}
     logger.warning("change lock for %s held by someone else: %s", site, info)
     return {
         **base,
@@ -107,10 +115,14 @@ async def release(
     except axiom_cc.LedgerUnavailable as exc:
         logger.error("change lock release failed for %s seq %s (now stale): %s", site, seq, exc)
         return {"site": site, "released": False, "reason": "STALE_RELEASE_FAILED"}
-    if code != axiom_cc.OK:
-        logger.error("change lock release refused for %s seq %s: %s", site, seq, info)
-        return {"site": site, "released": False, "reason": "RELEASE_REFUSED", "info": info}
-    return {"site": site, "released": True, "seq": seq}
+    if code == axiom_cc.OK:
+        return {"site": site, "released": True, "seq": seq}
+    # A retry can observe the release ref the previous attempt already created.
+    if info.get("result") == "NOT_HELD":
+        logger.info("change lock for %s seq %s is already released", site, seq)
+        return {"site": site, "released": True, "seq": seq, "reason": "ALREADY_RELEASED"}
+    logger.error("change lock release refused for %s seq %s: %s", site, seq, info)
+    return {"site": site, "released": False, "reason": "RELEASE_REFUSED", "info": info}
 
 
 async def assert_write_allowed(site: str, owner: str, settings: Settings | None = None) -> None:

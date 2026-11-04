@@ -131,6 +131,27 @@ async def test_off_mode_skips_github_entirely(github: tuple[Any, str]) -> None:
     await change_lock.assert_write_allowed(SITE, ME, settings)
 
 
+async def test_same_owner_reacquire_and_rerelease_are_idempotent(
+    github: tuple[Any, str],
+) -> None:
+    settings = _settings(github[1])
+    first = await change_lock.acquire(SITE, ME, "m1", "1 URL", settings)
+    again = await change_lock.acquire(SITE, ME, "m1", "1 URL", settings)
+    assert again["allowed"] is True
+    assert again["reason"] == "LOCK_ALREADY_HELD"
+    assert again["seq"] == first["seq"] == 1
+    assert len([ref for ref in github[0].refs if "/lock/" in ref]) == 1
+    await change_lock.assert_write_allowed(SITE, ME, settings)
+    done = await change_lock.release(SITE, ME, "m1", again["seq"], "ok", settings)
+    assert done["released"] is True
+    repeated = await change_lock.release(SITE, ME, "m1", again["seq"], "ok", settings)
+    assert repeated["released"] is True
+    assert repeated["reason"] == "ALREADY_RELEASED"
+    assert len([ref for ref in github[0].refs if "/release/" in ref]) == 1
+    assert TOKEN not in repr(again)
+    assert TOKEN not in repr(repeated)
+
+
 async def test_token_never_leaks_into_results_or_ledger(github: tuple[Any, str]) -> None:
     settings = _settings(github[1])
     lock = await change_lock.acquire(SITE, ME, "m1", "", settings)
