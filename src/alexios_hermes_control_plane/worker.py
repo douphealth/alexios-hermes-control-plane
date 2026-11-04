@@ -4,6 +4,10 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from alexios_hermes_control_plane.activities.agents import run_judge, run_specialist, run_verifier
+from alexios_hermes_control_plane.activities.change_lock import (
+    change_lock_acquire,
+    change_lock_release,
+)
 from alexios_hermes_control_plane.activities.context import (
     load_context_config,
     registry_configured_roles,
@@ -83,6 +87,8 @@ async def main() -> None:
             wordpress_apply_mutation,
             wordpress_validate_mutation,
             wordpress_rollback_mutation,
+            change_lock_acquire,
+            change_lock_release,
         ],
         max_concurrent_activities=settings.max_concurrent_activities,
     )
