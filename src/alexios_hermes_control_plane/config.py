@@ -1,6 +1,7 @@
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -68,6 +69,16 @@ class Settings(BaseSettings):
     wordpress_backup_dir: str = "/var/lib/ahcp/backups"
 
     allow_production_writes: bool = Field(default=False)
+
+    # AXIOM change control: one writer per site, coordinated through a GitHub ledger.
+    # off = no check, observe = take the lock when possible but never block,
+    # enforce = no WordPress write without holding the site lock (fails closed).
+    change_lock_mode: Literal["off", "observe", "enforce"] = "observe"
+    change_lock_fail_open: bool = False
+    axiom_cc_token: SecretStr | None = None
+    axiom_cc_repo: str = "douphealth/hermes-config-001"
+    axiom_cc_ledger_issue: int = Field(default=6, ge=1)
+    axiom_cc_timeout_seconds: float = Field(default=20.0, ge=2.0, le=60.0)
 
     @field_validator("app_env")
     @classmethod

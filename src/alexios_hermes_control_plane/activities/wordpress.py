@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlparse
 import httpx
 from temporalio import activity
 
+from alexios_hermes_control_plane.activities import change_lock
 from alexios_hermes_control_plane.config import get_settings
 from alexios_hermes_control_plane.schemas.execution import (
     MutationReceipt,
@@ -180,6 +181,9 @@ async def wordpress_apply_mutation(
         body["status"] = "draft"
 
     site = _credentials(mutation.site_id)
+    await change_lock.assert_write_allowed(
+        change_lock.site_key(site["base_url"]), change_lock.current_owner()
+    )
     endpoint = _item_endpoint(site["base_url"], snapshot.post_type, mutation.post_id)
     async with _client(site) as client:
         response = await client.post(endpoint, json=body)

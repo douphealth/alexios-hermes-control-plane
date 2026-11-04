@@ -80,6 +80,13 @@ read-only workflow.
 7. There is no hidden model routing or silent fallback.
 8. Provider secrets and Google service-account credentials are host configuration and must never be committed.
 9. UNGROUNDED or UNVERIFIED findings cannot become interventions even if the verifier is unavailable.
+10. AXIOM change control: before a WordPress mutation the autonomous workflow takes the
+    per-site lock in the AXIOM GitHub ledger (`change_lock_acquire`), holds it through
+    validation/rollback, then releases it (`change_lock_release`). The apply activity re-checks
+    that this workflow holds the lock. `CHANGE_LOCK_MODE=observe` (default) never blocks;
+    `enforce` skips the mutation when another agent holds the site and fails closed when the
+    ledger is unreachable (`CHANGE_LOCK_FAIL_OPEN=true` is an explicit override). Stale locks
+    are only reported, never broken. The token comes from `AXIOM_CC_TOKEN` only.
 
 ## GSC evidence configuration
 

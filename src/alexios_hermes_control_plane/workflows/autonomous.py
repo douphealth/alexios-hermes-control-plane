@@ -5,6 +5,10 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    from alexios_hermes_control_plane.activities.change_lock import (
+        change_lock_acquire,
+        change_lock_release,
+    )
     from alexios_hermes_control_plane.activities.implementation import run_implementer
     from alexios_hermes_control_plane.activities.mutation_guard import (
         mutation_candidate_eligible,
@@ -187,76 +191,116 @@ class AutonomousGrowthWorkflow:
                             )
                             continue
 
-                        baseline: dict[str, Any] = {}
-                        try:
-                            baseline = cast(
+                        lock_seq: int | None = None
+                        if workflow.patched("axiom-change-lock-v1"):
+                            lock = cast(
                                 dict[str, Any],
                                 await workflow.execute_activity(
-                                    capture_gsc_baselines,
-                                    args=[site_id, mutation.target_url],
-                                    start_to_close_timeout=timedelta(minutes=2),
-                                    retry_policy=retry,
-                                ),
-                            )
-                        except Exception:
-                            baseline = {}
-
-                        apply_args = [mutation_payload, snapshot, requested_mode.value]
-                        applied_payload = cast(
-                            dict[str, Any],
-                            await workflow.execute_activity(
-                                wordpress_apply_mutation,
-                                args=apply_args,
-                                start_to_close_timeout=timedelta(minutes=1),
-                                retry_policy=RetryPolicy(maximum_attempts=1),
-                            ),
-                        )
-                        applied = MutationReceipt.model_validate(applied_payload)
-                        try:
-                            validated_payload = cast(
-                                dict[str, Any],
-                                await workflow.execute_activity(
-                                    wordpress_validate_mutation,
-                                    args=[mutation_payload, applied_payload],
+                                    change_lock_acquire,
+                                    args=[
+                                        site_id,
+                                        mutation.mutation_id,
+                                        f"1 URL: {mutation.target_url}",
+                                    ],
                                     start_to_close_timeout=timedelta(minutes=1),
-                                    retry_policy=retry,
+                                    retry_policy=RetryPolicy(maximum_attempts=2),
                                 ),
                             )
-                            validated = MutationReceipt.model_validate(validated_payload)
-                            if validated.status != "VALIDATED":
-                                error = validated.validation_error or "validation failed"
-                                raise RuntimeError(error)
-                            await workflow.execute_activity(
-                                record_autonomous_mutation,
-                                args=[
-                                    workflow_id,
-                                    mutation_payload,
-                                    validated.model_dump(mode="json"),
-                                    baseline,
-                                ],
-                                start_to_close_timeout=timedelta(seconds=30),
-                                retry_policy=RetryPolicy(maximum_attempts=3),
-                            )
-                            receipts.append(validated.model_dump(mode="json"))
-                            site_mutations[site_id] = site_mutations.get(site_id, 0) + 1
-                        except Exception as exc:
-                            rolled_back = cast(
+                            if not bool(lock.get("allowed")):
+                                execution_skips.append(
+                                    {
+                                        "target": mutation.target_url,
+                                        "site_id": site_id,
+                                        "mutation_id": mutation.mutation_id,
+                                        **lock,
+                                    }
+                                )
+                                continue
+                            lock_seq = cast(int | None, lock.get("seq"))
+                        try:
+                            baseline: dict[str, Any] = {}
+                            try:
+                                baseline = cast(
+                                    dict[str, Any],
+                                    await workflow.execute_activity(
+                                        capture_gsc_baselines,
+                                        args=[site_id, mutation.target_url],
+                                        start_to_close_timeout=timedelta(minutes=2),
+                                        retry_policy=retry,
+                                    ),
+                                )
+                            except Exception:
+                                baseline = {}
+
+                            apply_args = [mutation_payload, snapshot, requested_mode.value]
+                            applied_payload = cast(
                                 dict[str, Any],
                                 await workflow.execute_activity(
-                                    wordpress_rollback_mutation,
-                                    args=[applied.model_dump(mode="json")],
+                                    wordpress_apply_mutation,
+                                    args=apply_args,
+                                    start_to_close_timeout=timedelta(minutes=1),
+                                    retry_policy=RetryPolicy(maximum_attempts=1),
+                                ),
+                            )
+                            applied = MutationReceipt.model_validate(applied_payload)
+                            try:
+                                validated_payload = cast(
+                                    dict[str, Any],
+                                    await workflow.execute_activity(
+                                        wordpress_validate_mutation,
+                                        args=[mutation_payload, applied_payload],
+                                        start_to_close_timeout=timedelta(minutes=1),
+                                        retry_policy=retry,
+                                    ),
+                                )
+                                validated = MutationReceipt.model_validate(validated_payload)
+                                if validated.status != "VALIDATED":
+                                    error = validated.validation_error or "validation failed"
+                                    raise RuntimeError(error)
+                                await workflow.execute_activity(
+                                    record_autonomous_mutation,
+                                    args=[
+                                        workflow_id,
+                                        mutation_payload,
+                                        validated.model_dump(mode="json"),
+                                        baseline,
+                                    ],
+                                    start_to_close_timeout=timedelta(seconds=30),
+                                    retry_policy=RetryPolicy(maximum_attempts=3),
+                                )
+                                receipts.append(validated.model_dump(mode="json"))
+                                site_mutations[site_id] = site_mutations.get(site_id, 0) + 1
+                            except Exception as exc:
+                                rolled_back = cast(
+                                    dict[str, Any],
+                                    await workflow.execute_activity(
+                                        wordpress_rollback_mutation,
+                                        args=[applied.model_dump(mode="json")],
+                                        start_to_close_timeout=timedelta(minutes=1),
+                                        retry_policy=RetryPolicy(maximum_attempts=3),
+                                    ),
+                                )
+                                rolled_back["validation_error"] = str(exc)[:1000]
+                                await workflow.execute_activity(
+                                    record_autonomous_mutation,
+                                    args=[workflow_id, mutation_payload, rolled_back, baseline],
+                                    start_to_close_timeout=timedelta(seconds=30),
+                                    retry_policy=RetryPolicy(maximum_attempts=3),
+                                )
+                                receipts.append(rolled_back)
+                        finally:
+                            if lock_seq is not None:
+                                await workflow.execute_activity(
+                                    change_lock_release,
+                                    args=[
+                                        site_id,
+                                        mutation.mutation_id,
+                                        lock_seq,
+                                        f"workflow {workflow_id}",
+                                    ],
                                     start_to_close_timeout=timedelta(minutes=1),
                                     retry_policy=RetryPolicy(maximum_attempts=3),
-                                ),
-                            )
-                            rolled_back["validation_error"] = str(exc)[:1000]
-                            await workflow.execute_activity(
-                                record_autonomous_mutation,
-                                args=[workflow_id, mutation_payload, rolled_back, baseline],
-                                start_to_close_timeout=timedelta(seconds=30),
-                                retry_policy=RetryPolicy(maximum_attempts=3),
-                            )
-                            receipts.append(rolled_back)
+                                )
                 except Exception as exc:
                     plans.append(
                         {
